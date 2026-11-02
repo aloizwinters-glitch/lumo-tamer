@@ -73,7 +73,7 @@ export function invalidModelOrEffort(
   }
   if (!isValidReasoningEffort(effort)) {
     return {
-      message: `Invalid ${effortParam} '${String(effort)}'. Allowed: none, low, medium, high`,
+      message: `Invalid ${effortParam} '${String(effort)}'. Allowed: none, minimal, low, medium, high, xhigh, default`,
       param: effortParam,
       code: 'invalid_reasoning_effort',
     };

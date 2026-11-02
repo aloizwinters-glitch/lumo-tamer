@@ -18,8 +18,11 @@ export function normalizeModelId(model?: unknown): string {
     return slash >= 0 ? lower.slice(slash + 1) : lower;
 }
 
-/** Valid inbound reasoning_effort values (plus absent/null meaning "use default"). */
-export const VALID_REASONING_EFFORTS = ['none', 'low', 'medium', 'high'] as const;
+/** Valid inbound reasoning_effort values (plus absent/null meaning "use default").
+ * 'minimal'/'xhigh' are accepted for client compatibility (OpenCode's thinking
+ * selector sends them); Lumo itself only supports high/none.
+ * 'default' means "use the configured default" and behaves like absent. */
+export const VALID_REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'default'] as const;
 
 /** True if the effort is absent/null or one of the valid string values. */
 export function isValidReasoningEffort(effort: unknown): boolean {
@@ -171,7 +174,14 @@ export function resolveReasoning(
         return modelReasoning === 'high';
     }
     if (effort !== undefined && effort !== null) {
-        return effort !== 'none';
+        const normalized = typeof effort === 'string' ? effort.toLowerCase() : effort;
+        // 'default' means "use the configured default" — behave like absent.
+        if (normalized === 'default') {
+            /* fall through to defaults below */
+        } else {
+            // Lumo supports only high/none; every non-none effort maps to thinking ON.
+            return normalized !== 'none';
+        }
     }
     if (modelReasoning === 'high') return true;
     if (modelReasoning === 'none') return false;

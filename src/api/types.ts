@@ -69,7 +69,7 @@ export interface OpenAIChatRequest {
   max_tokens?: number;
   max_completion_tokens?: number;
   // Thinking mode: 'none' disables; 'low'/'medium'/'high' enable reasoning.
-  reasoning_effort?: 'none' | 'low' | 'medium' | 'high' | null;
+  reasoning_effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'default' | null;
   tools?: OpenAITool[];
   tool_choice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } };
   user?: string;
