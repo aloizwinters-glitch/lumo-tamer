@@ -12,6 +12,8 @@ function isOpenUiPath(path: string): boolean {
     || path === '/v1/config'
     || path === '/v1/restart'
     || path === '/v1/update'
+    || path === '/logs'
+    || path === '/v1/logs'
   );
 }
 

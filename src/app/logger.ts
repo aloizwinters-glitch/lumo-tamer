@@ -3,6 +3,7 @@ import type { LogConfig } from './config.js';
 import { resolveDataPath } from './paths.js';
 import { installConsoleShim } from '../shims/console.js';
 import { redactLogArgs } from './log-redact.js';
+import { broadcastEntry, levelNumToName } from './log-broadcast.js';
 
 // Determine transport based on config
 function getTransport(config: LogConfig): pino.TransportSingleOptions | pino.TransportMultiOptions {
@@ -54,7 +55,10 @@ export function createLogger(config: LogConfig): pino.Logger {
     serializers: { error: pino.stdSerializers.err },
     hooks: {
       logMethod(inputArgs, method) {
-        method.apply(this, redactLogArgs(inputArgs as unknown[]) as Parameters<typeof method>);
+        const redacted = redactLogArgs(inputArgs as unknown[]) as Parameters<typeof method>;
+        // Feed the live-log ring buffer (already-redacted entries only).
+        broadcastEntry(levelNumToName(Number(this.level)), redacted as unknown[]);
+        method.apply(this, redacted);
       },
     },
   });

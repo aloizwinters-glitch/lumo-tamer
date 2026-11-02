@@ -14,6 +14,7 @@ import { createResponsesRouter } from './routes/responses/index.js';
 import { createAuthRouter } from './routes/auth.js';
 import { createConfigRouter } from './routes/config.js';
 import { createUpdatesRouter } from './routes/updates.js';
+import { createLogsRouter } from './routes/logs.js';
 import { startUpdateChecker } from '../app/updates.js';
 import { EndpointDependencies } from './types.js';
 import { RequestQueue } from './queue.js';
@@ -82,6 +83,7 @@ export class APIServer {
       getSessionNotice: () => this.app.getSessionNotice(),
     }));
     this.expressApp.use(createUpdatesRouter());
+    this.expressApp.use(createLogsRouter());
     this.expressApp.use(createConfigRouter(this.app, {
       onSaved: () => {
         restartAfterConfigSave();
