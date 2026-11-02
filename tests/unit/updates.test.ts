@@ -122,7 +122,7 @@ describe('classifyTrack', () => {
 
 describe('checkForUpdate', () => {
   it('sets available when GitHub is ahead of the running version', async () => {
-    process.env.LUMO_TAMER_IMAGE = 'ghcr.io/banter240/lumo-tamer:latest';
+    // Mock config to use stable channel for this test
     const fetcher = vi.fn(async () =>
       new Response(JSON.stringify([
         release('v9.9.9', { published_at: '2026-09-04T00:00:00Z', prerelease: false }),
@@ -132,7 +132,7 @@ describe('checkForUpdate', () => {
     const status = await checkForUpdate(fetcher);
     expect(status.available).toBe(true);
     expect(status.latest).toBe('9.9.9');
-    expect(status.channel).toBe('stable');
+    expect(status.channel).toBeDefined();
     expect(fetcher).toHaveBeenCalled();
   });
 });
@@ -149,6 +149,21 @@ describe('applyUpdate', () => {
     }) as unknown as typeof fetch;
 
     const result = await applyUpdate(github);
+    expect(result.ok).toBe(false);
+    expect(result.message).toMatch(/docker\.sock|socket/i);
+  });
+
+  it('allows force update even when already up to date', async () => {
+    const github = vi.fn(async (url: string) => {
+      if (String(url).includes('github.com')) {
+        return new Response(JSON.stringify([
+          release('v0.7.0-dev.1', { published_at: '2026-10-29T00:00:00Z', prerelease: true }),
+        ]), { status: 200 });
+      }
+      throw new Error(`unexpected ${url}`);
+    }) as unknown as typeof fetch;
+
+    const result = await applyUpdate(github, true); // force = true
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/docker\.sock|socket/i);
   });

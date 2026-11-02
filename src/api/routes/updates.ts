@@ -1,6 +1,6 @@
 /**
  * GET  /v1/update  — GitHub check (cached)
- * POST /v1/update  — pull GHCR and recreate this container
+ * POST /v1/update  — pull GHCR and recreate this container (?force=1 skips the version check)
  */
 
 import { Router, Request, Response } from 'express';
@@ -40,7 +40,8 @@ export function createUpdatesRouter(): Router {
       return;
     }
     try {
-      const result = await applyUpdate();
+      const force = req.query.force === '1' || req.query.force === 'true';
+      const result = await applyUpdate(undefined, force);
       res.status(result.ok ? 200 : 409).json(result);
     } catch (error) {
       logger.error({ error }, 'POST /v1/update failed');

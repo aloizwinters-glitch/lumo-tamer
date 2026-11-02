@@ -362,7 +362,10 @@ export function getCachedUpdateStatus(): UpdateStatus {
   return cached ?? emptyStatus();
 }
 
-export async function applyUpdate(fetcher: typeof fetch = fetch): Promise<{
+export async function applyUpdate(
+  fetcher: typeof fetch = fetch,
+  force = false,
+): Promise<{
   ok: boolean;
   status: UpdateStatus;
   message: string;
@@ -371,15 +374,22 @@ export async function applyUpdate(fetcher: typeof fetch = fetch): Promise<{
     return { ok: false, status: getCachedUpdateStatus(), message: 'An update is already running.' };
   }
   const status = cached?.checkedAt ? cached : await checkForUpdate(fetcher);
-  if (!status.available) {
+  if (!force && !status.available) {
     return { ok: false, status, message: status.error || 'Already up to date.' };
   }
-  if (!status.canApply) {
+  if (!force && !status.canApply) {
     return { ok: false, status, message: status.applyHint || 'Cannot apply this update from here.' };
   }
   const cfg = getUpdatesConfig();
   applying = true;
   try {
+    if (force && !dockerSocketAvailable(cfg.dockerSocket)) {
+      return {
+        ok: false,
+        status,
+        message: `This container has no Docker socket at ${cfg.dockerSocket}. Bind-mount it (see docker-compose.yml) to force-update from here.`,
+      };
+    }
     const imageRef = targetImageRef(cfg.repository, cfg.channel);
     const name = process.env.LUMO_CONTAINER_NAME || APP.CONTAINER_NAME;
     logger.info({
@@ -390,7 +400,7 @@ export async function applyUpdate(fetcher: typeof fetch = fetch): Promise<{
     return {
       ok: true,
       status,
-      message: `Pulled ${imageRef} (${status.latest}). Recreating this container.`
+      message: `${force ? 'Force-pulled' : 'Pulled'} ${imageRef} (${status.latest ?? 'current channel'}). Recreating this container.`
         + (status.action === 'switch' || status.action === 'downgrade' ? envHint : ''),
     };
   } finally {

@@ -60,7 +60,7 @@ const UPDATE_BIND = `(function(){
       return;
     }
     chip.textContent = 'Up to date';
-    chip.title = (info && info.current ? 'Running ' + info.current + ' on ' + (info.runningChannel || info.channel) + '. ' : '') + 'Click to check again';
+    chip.title = (info && info.current ? 'Running ' + info.current + ' on ' + (info.runningChannel || info.channel) + '. ' : '') + 'Click to check again · Shift+click: force update';
   }
   function check(force) {
     if (busy) return;
@@ -83,11 +83,13 @@ const UPDATE_BIND = `(function(){
       if (force) toast(info.error, false);
     });
   }
-  function apply() {
+  function apply(force) {
     var latest = (info && info.latest) || 'the new image';
     var action = info && info.action;
     var msg;
-    if (action === 'downgrade') {
+    if (force) {
+      msg = 'Pull the latest ' + ((info && info.channel) || 'current') + ' image from GHCR and recreate this container now, even if the version looks unchanged? Chat pauses until it is back.';
+    } else if (action === 'downgrade') {
       msg = 'Switch from ' + (info.current || currentVer) + ' (' + (info.runningChannel || 'dev')
         + ') to ' + latest + ' on stable/main? That is a DOWNGRADE. config.yaml, the vault, and Settings may not load. Continue?';
     } else if (action === 'switch') {
@@ -101,7 +103,7 @@ const UPDATE_BIND = `(function(){
     busy = true;
     chip.disabled = true;
     chip.textContent = 'Updating…';
-    fetch('/v1/update', { method: 'POST' }).then(function(res) {
+    fetch('/v1/update' + (force ? '?force=1' : ''), { method: 'POST' }).then(function(res) {
       return res.json().then(function(data) {
         if (!res.ok) throw new Error(data.message || data.error || 'Update failed');
         return data;
@@ -131,8 +133,9 @@ const UPDATE_BIND = `(function(){
       paint();
     });
   }
-  chip.addEventListener('click', function() {
+  chip.addEventListener('click', function(ev) {
     if (busy) return;
+    if (ev.shiftKey) { apply(true); return; }
     if (info && info.available && info.canApply) apply();
     else if (info && info.available) toast(info.applyHint || 'Cannot apply from this page', false);
     else check(true);
