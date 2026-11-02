@@ -523,6 +523,10 @@ const PREFIX_COPY: Array<[string, FieldCopy]> = [
     hint: 'Command used for that language tag. Space-separated; the code is appended as the last argument.',
     more: 'Space-separated binary and flags only, not a shell line. The model output is passed as one extra argument. Restrict this if you do not want Python/Node available.',
   }],
+  ['server.customTools.modules.', {
+    hint: 'Instruction module for custom tools. Enable to append this text to the tool-call protocol.',
+    more: 'Each module appends its prompt to forTools when enabled. Use modules to add instruction packs (e.g., Home Assistant, MCP servers) without editing the base forTools template.',
+  }],
   ['auth.vault.', {
     hint: 'Where the encrypted token vault and its key live. Docker uses the secret file.',
     more: 'The vault holds refresh tokens. The key lives in the OS keychain on a desktop, or in keyFilePath on Docker. Losing the key makes the vault unreadable; you will need to log in again.',
@@ -561,6 +565,7 @@ export const FIELD_DEPENDENCIES: Record<string, FieldDependency> = {
   'conversations.enableSync': { parent: 'auth.method', showValues: ['browser', 'login'] },
   'conversations.projectName': { parent: 'conversations.enableSync', showValues: [true] },
   'server.customTools.prefix': { parent: 'server.customTools.enabled', showValues: [true] },
+  'server.customTools.modules.homeAssistant.prompt': { parent: 'server.customTools.modules.homeAssistant.enabled', showValues: [true] },
   'server.metrics.collectDefaultMetrics': { parent: 'server.metrics.enabled', showValues: [true] },
   'server.metrics.prefix': { parent: 'server.metrics.enabled', showValues: [true] },
   'server.promptTokenEstimationFactor': { parent: 'server.promptTokenEstimation', showValues: ['auto'] },
@@ -648,6 +653,7 @@ export function choicesFor(path: string): string[] | undefined {
 export function fieldCategory(path: string): string {
   // Sub-categories (specific paths before their parents' broad prefixes).
   // Rule: parents with sub-categories keep no fields of their own.
+  if (path.startsWith('server.customTools.modules.')) return 'toolsGeneral';
   if (path.startsWith('server.customTools.recovery.')) return 'recovery';
   if (path.startsWith('server.customTools.routing.')) return 'routing';
   if (path === 'server.customTools.enabled' || path === 'server.customTools.prefix') return 'toolsGeneral';

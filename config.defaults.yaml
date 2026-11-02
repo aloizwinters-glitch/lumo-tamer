@@ -191,6 +191,27 @@ server:
     # Set to "" to disable prefixing.
     prefix: "user:"
 
+    # Instruction modules: optional blocks appended to forTools when enabled.
+    # Use this to add/remove instruction packs (e.g., Home Assistant, MCP servers)
+    # without editing the base forTools template.
+    modules:
+      homeAssistant:
+        enabled: false
+        # {{prefix}} is interpolated at runtime. Do not repeat the base
+        # protocol here — this block is appended to forTools.
+        prompt: |
+          # Home Assistant
+          HA proxy tools (ha_call_read_tool, ha_call_write_tool, ha_call_delete_tool)
+          have their own nested "name" and "arguments". Still wrap everything
+          in the outer protocol "arguments":
+          ```json
+          {"name": "{{prefix}}home-assistant_ha_call_read_tool", "arguments": {"name": "ha_search", "arguments": {"query": "kitchen"}}}
+          ```
+          Outer "arguments" = protocol envelope. Inner "arguments" = HA tool params.
+          - Call ha_get_skill_guide() first: it returns SKILL.md with reference files.
+          - Most other custom tools are NOT listed directly: use ha_search_tools.
+          - Execute discovered tools directly or via ha_call_read/write/delete_tool.
+
     # Reply recovery: bounce Lumo when it thinks but never emits a tool-call JSON block.
     recovery:
       # Bounce replies that end on a dangling colon after announcing an action.

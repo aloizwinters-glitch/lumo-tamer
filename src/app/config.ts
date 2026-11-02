@@ -55,9 +55,15 @@ const replacePatternSchema = z.object({
 });
 
 // Server-specific custom tools config
+const customToolsModuleSchema = z.object({
+  enabled: z.boolean(),
+  prompt: z.string().optional(),
+});
+
 const customToolsConfigSchema = z.object({
   enabled: z.boolean(),
   prefix: z.string(),
+  modules: z.record(z.string(), customToolsModuleSchema).optional(),
   recovery: z.object({
     bounceDanglingColon: z.boolean(),
     bounceNarration: z.boolean(),

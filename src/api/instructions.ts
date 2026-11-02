@@ -131,8 +131,20 @@ export function buildInstructions(
   const includeTools = toolsConfig.enabled && tools && tools.length > 0;
 
   // Full protocol on the first user turn; a short reminder after that.
+  let forToolsTemplate = compact ? instructionsConfig.forToolsCompact : instructionsConfig.forTools;
+
+  // Append enabled instruction modules to forTools
+  if (includeTools && toolsConfig.modules) {
+    const enabledModules = Object.entries(toolsConfig.modules)
+      .filter(([, mod]) => mod.enabled && mod.prompt && mod.prompt.trim())
+      .map(([name, mod]) => `\n\n# ${name}\n${mod.prompt!.trim()}`);
+    if (enabledModules.length > 0) {
+      forToolsTemplate += enabledModules.join('\n');
+    }
+  }
+
   const forTools = interpolateTemplate(
-    compact ? instructionsConfig.forToolsCompact : instructionsConfig.forTools,
+    forToolsTemplate,
     { prefix },
   );
 
