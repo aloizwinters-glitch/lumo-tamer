@@ -1,3 +1,16 @@
+## [0.7.0-dev.3](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.2...v0.7.0-dev.3) (2026-11-04)
+
+### Bug Fixes
+
+* fix(ui): homeAssistant module toggle labeled and moved to Prompts
+
+  - proper labels for enabled/prompt fields in the COPY map
+    (previously fell back to bare "Enabled")
+  - category promptsGeneral so the fields show under Prompts,
+    not Tools
+  ,- dependency wiring unchanged: prompt stays hidden while the
+    toggle is off
+
 ## [0.7.0-dev.2](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.1...v0.7.0-dev.2) (2026-11-04)
 
 ### Features
