@@ -1,3 +1,47 @@
+## [0.7.0-dev.2](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.1...v0.7.0-dev.2) (2026-11-04)
+
+### Features
+
+* feat(auth): include reachable /auth URL in auth-required errors
+
+  - 503 auth_required and 401 sendAuthRequired build the /auth URL
+    from the request Host header (protocol + host:port), so remote
+    clients like OpenCode see the actual address to open
+  - Fallback to /auth when headers are missing
+  - sendAuthRequired takes the request; callers updated
+  - tests: compute expected prompt_tokens from the sent request body
+    instead of the stale hardcoded 90; drop redundant inline comments
+* feat(customTools): instruction modules with per-module toggle
+
+  - customTools.modules.<name> = { enabled, prompt } record in config
+  - Enabled module prompts are appended to forTools/forToolsCompact
+    (before {{prefix}} interpolation, so modules can use {{prefix}})
+  - Ships a disabled homeAssistant module with the HA nested-call example
+  - Config UI: module fields under Tools > General; prompt field only
+    visible when the module toggle is on
+  - Base forTools stays untouched - modules are drop-in packs
+* feat(logging): live logs page (/logs) with redacted ring buffer
+
+  - src/app/log-broadcast.ts broadcasts already-redacted log entries
+  - GET /v1/logs + /logs page without API key, like the other UI pages
+  - logger hook feeds the broadcast from the logMethod pipeline
+  - Nav buttons for Logs/Settings/Account on all three pages
+* feat(models): accept minimal/xhigh/default reasoning_effort values
+
+  - OpenCode's thinking selector sends minimal/xhigh - accept them
+    for client compatibility instead of rejecting with 400
+  - 'default' behaves like absent: falls back to the configured
+    default reasoning mode
+  - Lumo itself still only distinguishes high/none
+* feat(updates): force-update via Shift+click on the update chip
+
+  - POST /v1/update?force=1 bypasses the version and canApply guards
+  - applyUpdate(fetcher, force) still requires the Docker socket
+  - Shift+click force-pulls the channel image even when the version is
+    unchanged (covers GHCR rebuilds with the same version tag)
+  - Update chip tooltip documents the Shift+click shortcut
+  - Test: force apply without a Docker socket still refuses
+
 ## [0.7.0-dev.1](https://github.com/banter240/lumo-tamer/compare/v0.6.0...v0.7.0-dev.1) (2026-10-29)
 
 ### Features
