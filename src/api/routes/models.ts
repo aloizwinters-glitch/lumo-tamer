@@ -31,7 +31,7 @@ export function createModelsRouter(): Router {
   });
 
   router.get('/v1/models/:id', (req: Request, res: Response) => {
-    const id = decodeURIComponent(req.params.id);
+    const id = decodeURIComponent(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id);
     const allowed = advertised;
     const match = allowed.find((m) => m === id || m === id.split('/').pop());
     if (!match) {
