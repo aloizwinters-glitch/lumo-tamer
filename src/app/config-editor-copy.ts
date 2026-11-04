@@ -434,6 +434,15 @@ const COPY: Record<string, FieldCopy> = {
     hint: 'Tool-call protocol sent on the first user turn. Put HA nesting examples here if you need them.',
     more: 'This is the contract for JSON-in-a-fence custom tools. Keep the MUST-fence wording unless you know the client. HA nested tools belong in your override of this block, not in the template.',
   },
+  'server.customTools.modules.homeAssistant.enabled': {
+    label: 'Home Assistant instructions',
+    hint: 'Append the Home Assistant instruction pack to the tool-call protocol.',
+    more: 'When on, the prompt below is appended to forTools/forToolsCompact whenever custom tools are active. Use this instead of editing the base protocol.',
+  },
+  'server.customTools.modules.homeAssistant.prompt': {
+    label: 'Home Assistant instruction text',
+    hint: 'HA proxy-tool nesting and workflow hints. Sent only while the toggle above is on.',
+  },
   'server.instructions.forToolsCompact': {
     label: 'Tool-call protocol (follow-ups)',
     hint: 'Shorter protocol on follow-up turns. Copy any HA nesting you added to the first-turn block.',
@@ -653,7 +662,7 @@ export function choicesFor(path: string): string[] | undefined {
 export function fieldCategory(path: string): string {
   // Sub-categories (specific paths before their parents' broad prefixes).
   // Rule: parents with sub-categories keep no fields of their own.
-  if (path.startsWith('server.customTools.modules.')) return 'toolsGeneral';
+  if (path.startsWith('server.customTools.modules.homeAssistant')) return 'promptsGeneral';
   if (path.startsWith('server.customTools.recovery.')) return 'recovery';
   if (path.startsWith('server.customTools.routing.')) return 'routing';
   if (path === 'server.customTools.enabled' || path === 'server.customTools.prefix') return 'toolsGeneral';
