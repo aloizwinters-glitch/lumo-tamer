@@ -133,7 +133,6 @@ export function buildInstructions(
   // Full protocol on the first user turn; a short reminder after that.
   let forToolsTemplate = compact ? instructionsConfig.forToolsCompact : instructionsConfig.forTools;
 
-  // Append enabled instruction modules to forTools
   if (includeTools && toolsConfig.modules) {
     const enabledModules = Object.entries(toolsConfig.modules)
       .filter(([, mod]) => mod.enabled && mod.prompt && mod.prompt.trim())

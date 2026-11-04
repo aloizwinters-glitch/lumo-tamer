@@ -99,7 +99,7 @@ export function createResponsesRouter(deps: EndpointDependencies): Router {
       persistInboundTurns(deps, conversationId, turns);
 
       // ===== STEP 6: Add to queue and process =====
-      await handleRequest(res, deps, request, turns, conversationId, request.stream ?? false, instructions, injectInto);
+      await handleRequest(req, res, deps, request, turns, conversationId, request.stream ?? false, instructions, injectInto);
     } catch (error) {
       logger.error('Error processing response:');
       logger.error(error);

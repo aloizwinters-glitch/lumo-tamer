@@ -17,6 +17,13 @@ function isOpenUiPath(path: string): boolean {
   );
 }
 
+function authUrlFromRequest(req: { protocol?: string; get?: (h: string) => string | undefined }): string {
+  const host = req.get?.('host');
+  if (!host) return '/auth';
+  const proto = req.protocol || 'http';
+  return `${proto}://${host}/auth`;
+}
+
 export function setupAuthMiddleware(apiKey: string): RequestHandler {
   return (req, res, next) => {
     // /health exposes auth method, warnings, and last refresh error. Keep it off the public internet.
@@ -43,7 +50,7 @@ export function setupReadyMiddleware(isReady: () => boolean): RequestHandler {
     }
     return res.status(503).json({
       error: {
-        message: 'Not authenticated. Open /auth in your browser and log in to Proton.',
+        message: `Not authenticated. Open ${authUrlFromRequest(req)} in your browser and log in to Proton.`,
         type: 'auth_required',
       },
     });

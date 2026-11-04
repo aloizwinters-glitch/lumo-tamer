@@ -132,7 +132,7 @@ export function createChatCompletionsRouter(deps: EndpointDependencies): Router 
     } catch (error) {
       logger.error('Error processing chat completion:');
       logger.error(error);
-      if (isAuthError(error)) return sendAuthRequired(res);
+      if (isAuthError(error)) return sendAuthRequired(req, res);
       return sendServerError(res);
     }
   });

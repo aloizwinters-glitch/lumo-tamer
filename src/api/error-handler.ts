@@ -1,4 +1,4 @@
-import type { ErrorRequestHandler, Response } from 'express';
+import type { ErrorRequestHandler, Request as ExpressRequest, Response } from 'express';
 import { logger } from '../app/logger.js';
 
 // ============================================
@@ -60,12 +60,18 @@ function isInvalidJsonBody(err: unknown): boolean {
   return candidate.status === 400 && candidate.type === 'entity.parse.failed' && candidate.body !== undefined;
 }
 
+export type AuthRequestLike = Pick<ExpressRequest, 'protocol' | 'get'>;
+
 export function sendAuthRequired(
+  req: AuthRequestLike,
   res: Response
 ): Response<OpenAIErrorBody> {
+  const host = req.get?.('host');
+  const proto = req.protocol || 'http';
+  const authUrl = host ? `${proto}://${host}/auth` : '/auth';
   return res.status(401).json({
     error: {
-      message: 'Authentication expired or invalid. Open /auth in your browser and log in to Proton again.',
+      message: `Authentication expired or invalid. Open ${authUrl} in your browser and log in to Proton again.`,
       type: 'invalid_request_error',
       param: null,
       code: 'auth_required',
@@ -80,10 +86,10 @@ export function isAuthError(err: unknown): boolean {
 }
 
 export const setupApiErrorHandler = (): ErrorRequestHandler => {
-  return (err, _req, res, next) => {
+  return (err, req, res, next) => {
     if (isAuthError(err)) {
       logger.warn({ err }, 'Auth error in request - session may be invalid');
-      return sendAuthRequired(res);
+      return sendAuthRequired(req, res);
     }
 
     if (isPayloadTooLarge(err)) {

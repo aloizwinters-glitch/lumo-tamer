@@ -1,4 +1,4 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import {
   EndpointDependencies,
   OpenAIResponseRequest,
@@ -162,6 +162,7 @@ function createCompletedResponse(
 // ── Unified handler ────────────────────────────────────────────────
 
 export async function handleRequest(
+  req: Request,
   res: Response,
   deps: EndpointDependencies,
   request: OpenAIResponseRequest,
@@ -276,7 +277,7 @@ export async function handleRequest(
         res.end();
       } else {
         if (isAuthError(error)) {
-          sendAuthRequired(res);
+          sendAuthRequired(req, res);
         } else {
           sendServerError(res);
         }

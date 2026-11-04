@@ -604,7 +604,7 @@ export function createAuthRouter(deps: EndpointDependencies, hooks: AuthRouterHo
     } catch (error) {
       logger.error({ error }, 'Token refresh API failed');
       if (!deps.authManager) {
-        sendAuthRequired(res);
+        sendAuthRequired(req, res);
         return;
       }
       res.status(500).json({

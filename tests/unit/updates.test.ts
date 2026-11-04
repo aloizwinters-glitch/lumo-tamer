@@ -122,7 +122,6 @@ describe('classifyTrack', () => {
 
 describe('checkForUpdate', () => {
   it('sets available when GitHub is ahead of the running version', async () => {
-    // Mock config to use stable channel for this test
     const fetcher = vi.fn(async () =>
       new Response(JSON.stringify([
         release('v9.9.9', { published_at: '2026-09-04T00:00:00Z', prerelease: false }),
@@ -163,7 +162,7 @@ describe('applyUpdate', () => {
       throw new Error(`unexpected ${url}`);
     }) as unknown as typeof fetch;
 
-    const result = await applyUpdate(github, true); // force = true
+    const result = await applyUpdate(github, true);
     expect(result.ok).toBe(false);
     expect(result.message).toMatch(/docker\.sock|socket/i);
   });

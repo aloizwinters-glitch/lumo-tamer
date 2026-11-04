@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { LumoClient } from '../../src/lumo-client/client.js';
 import { Role } from '../../src/lumo-client/types.js';
 import type { ProtonApiOptions } from '../../src/lumo-client/types.js';
+import { estimatePromptTokens } from '../../src/app/token-estimate.js';
+import { getServerConfig } from '../../src/app/config.js';
 
 /** Build a fake SSE ReadableStream from CompletionChunk objects, ending with [DONE]. */
 function sseStream(chunks: object[]): ReadableStream<Uint8Array> {
@@ -56,16 +58,25 @@ describe('LumoClient (Lumo 2.0 chat/completions)', () => {
     });
 
     it('captures usage (tier category + serving model)', async () => {
-        const { client } = makeClient(() => [
-            cc({ content: 'x' }),
-            { object: 'CompletionChunk', model: 'lumo-max', choices: [], usage: { completion_tokens: 2, applied_limit_category: 'max' } },
-        ]);
+        let sentBody: unknown;
+        const { client } = makeClient((opts) => {
+            sentBody = opts.data;
+            return [
+                cc({ content: 'x' }),
+                { object: 'CompletionChunk', model: 'lumo-max', choices: [], usage: { completion_tokens: 2, applied_limit_category: 'max' } },
+            ];
+        });
         const res = await client.chatWithHistory([{ role: Role.User, content: 'hi' }]);
+        const bytes = Buffer.byteLength(JSON.stringify(sentBody), 'utf8');
         expect(res.usage).toEqual({
           completion_tokens: 2,
           applied_limit_category: 'max',
           model: 'lumo-max',
-          prompt_tokens: 90, // auto estimate: UTF-8 bytes / (4/1.45)
+          prompt_tokens: estimatePromptTokens(
+            bytes,
+            getServerConfig().promptTokenEstimation,
+            getServerConfig().promptTokenEstimationFactor ?? 1.0,
+          ),
         });
       });
 
