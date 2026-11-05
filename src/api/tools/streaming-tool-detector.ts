@@ -197,9 +197,49 @@ export class StreamingToolDetector {
   }
 
   /**
-   * Process code fence state - accumulate until closing ```.
+   * Process code fence state - accumulate until the closing ```.
+   *
+   * Tool-call fences carry JSON whose string values may contain ```
+   * (user:write of markdown etc). Inner fences are string content, not
+   * closers: a JSON fence closes only on a fence outside a string.
+   * Plain markdown fences keep the legacy first-fence-wins behavior.
    */
   private processCodeFenceState(result: ProcessResult): void {
+    const content = this.buffer + this.pendingText;
+
+    // Tool-call JSON payload: inner fences are string content, not closers.
+    if (/^\s*\{/.test(content)) {
+      let inString = false;
+      let escaped = false;
+      let closeIndex = -1;
+      for (let i = 0; i < content.length; i++) {
+        const ch = content[i];
+        if (escaped) {
+          escaped = false;
+        } else if (inString) {
+          if (ch === '\\') escaped = true;
+          else if (ch === '"') inString = false;
+        } else if (ch === '"') {
+          inString = true;
+        } else if (ch === '`' && content.startsWith('```', i)) {
+          closeIndex = i;
+          break;
+        }
+      }
+      if (closeIndex !== -1) {
+        logger.debug('Code block ending found (fence outside JSON string)');
+        this.buffer = content.slice(0, closeIndex);
+        this.pendingText = content.slice(closeIndex + 3);
+        this.completeCodeFence(result);
+        return;
+      }
+      // No closer outside a string yet. Keep buffering; a partial fence at
+      // the tail is re-scanned once more characters arrive.
+      this.buffer = content;
+      this.pendingText = '';
+      return;
+    }
+
     // First check pendingText for closing fence
     const endMatch = this.pendingText.match(/```/);
     if (endMatch && endMatch.index !== undefined) {

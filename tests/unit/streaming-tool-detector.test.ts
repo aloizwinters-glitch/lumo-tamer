@@ -384,3 +384,78 @@ describe('StreamingToolDetector', () => {
     });
   });
 });
+
+describe('nested fences in tool-call payloads', () => {
+  it('treats ``` inside JSON string arguments as content', () => {
+    const detector = new StreamingToolDetector({ knownToolNames: ['write'] });
+    const md = 'Intro\n\n```js\nconsole.log(1);\n```\n\nOutro';
+    const call = { name: 'user:write', arguments: { path: '/tmp/nested.md', content: md } };
+    const payload = JSON.stringify(call);
+    const { allToolCalls, allText } = processAll(detector, [
+      '```json\n' + payload.slice(0, 37),
+      payload.slice(37, 74),
+      payload.slice(74) + '\n```',
+    ]);
+    expect(allToolCalls).toEqual([{ name: 'write', arguments: call.arguments }]);
+    expect(allText).toBe('');
+  });
+
+  it('handles an even number of inner fences too', () => {
+    const detector = new StreamingToolDetector({ knownToolNames: ['write'] });
+    const md = '```a\n```\n```b\n```\nmid\n```c\n```';
+    const call = { name: 'user:write', arguments: { content: md } };
+    const { allToolCalls } = processAll(detector, [
+      '```json\n' + JSON.stringify(call) + '\n```',
+    ]);
+    expect(allToolCalls).toEqual([{ name: 'write', arguments: call.arguments }]);
+  });
+
+  it('still closes plain markdown fences at the first closer', () => {
+    const detector = new StreamingToolDetector();
+    const { allToolCalls, allText } = processAll(detector, [
+      '```\nplain text, no JSON\n```\nafter',
+    ]);
+    expect(allToolCalls).toEqual([]);
+    expect(allText).toContain('plain text');
+  });
+
+  it('closes a JSON fence when the closer is split across chunks', () => {
+    const detector = new StreamingToolDetector({ knownToolNames: ['edit'] });
+    const payload = JSON.stringify({ name: 'user:edit', arguments: { path: '/tmp/a' } });
+    const { allToolCalls } = processAll(detector, [
+      '```json\n' + payload + '\n',
+      '``',
+      '`',
+    ]);
+    expect(allToolCalls).toEqual([{ name: 'edit', arguments: { path: '/tmp/a' } }]);
+  });
+
+  it('handles an escaped backslash right before a fence inside a JSON string', () => {
+    const detector = new StreamingToolDetector({ knownToolNames: ['write'] });
+    const md = 'quote\\ then ' + '```' + ' still in string';
+    const call = { name: 'user:write', arguments: { content: md } };
+    const { allToolCalls } = processAll(detector, [
+      '```json\n' + JSON.stringify(call) + '\n```',
+    ]);
+    expect(allToolCalls).toEqual([{ name: 'write', arguments: call.arguments }]);
+  });
+
+  it('tolerates long runs of backticks (4+, 5+) inside JSON strings', () => {
+    const detector = new StreamingToolDetector({ knownToolNames: ['write'] });
+    const md = 'x' + '````' + 'y' + '```' + 'z' + '`````' + 'w';
+    const call = { name: 'user:write', arguments: { content: md } };
+    const { allToolCalls } = processAll(detector, [
+      '```json\n' + JSON.stringify(call) + '\n```',
+    ]);
+    expect(allToolCalls).toEqual([{ name: 'write', arguments: call.arguments }]);
+  });
+
+  it('salvages an unclosed JSON fence at end of stream (finalize path)', () => {
+    const detector = new StreamingToolDetector({ knownToolNames: ['edit'] });
+    const payload = JSON.stringify({ name: 'user:edit', arguments: { path: '/u' } });
+    const { allToolCalls } = processAll(detector, [
+      '```json\n' + payload + '\n',
+    ]);
+    expect(allToolCalls).toEqual([{ name: 'edit', arguments: { path: '/u' } }]);
+  });
+});
