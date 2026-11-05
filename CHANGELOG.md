@@ -1,3 +1,36 @@
+## [0.7.0-dev.5](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.4...v0.7.0-dev.5) (2026-11-05)
+
+### Features
+
+* feat(updates): optional GitHub PAT for release checks
+
+  The periodic release check uses anonymous GitHub API: 60 req/h per IP,
+  which the checker alone can exhaust — the update chip then shows a
+  GitHub releases 403 and latest stays null.
+
+  - updates.githubToken (optional string) in config; empty = anonymous
+  - Authorization: Bearer header on the releases and branch-version fetches
+  - GITHUB_TOKEN env var as fallback (config wins)
+  - config UI field marked secret: value never displayed, blank save keeps
+    the existing token (same semantics as server.apiKey)
+
+  Tests: 540 passed.
+
+### Bug Fixes
+
+* fix(config): sort drop-in module fields below base prompts
+
+  Field order in a category came straight from config.defaults.yaml document
+  order. customTools sits before instructions there, so after the HA module
+  moved to promptsGeneral its toggle rendered above the base prompts.
+
+  - fieldOrderKey(): explicit render priority per path prefix
+  - walkConfigFields stable-sorts by it: server.instructions.* first,
+    server.customTools.modules.* after, everything else document order
+  - regression test walks a YAML-like tree with modules-first order
+
+  Tests: 541 passed.
+
 ## [0.7.0-dev.4](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.3...v0.7.0-dev.4) (2026-11-05)
 
 ### Bug Fixes
