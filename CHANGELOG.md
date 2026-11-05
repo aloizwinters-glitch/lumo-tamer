@@ -1,3 +1,24 @@
+## [0.7.0-dev.4](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.3...v0.7.0-dev.4) (2026-11-05)
+
+### Bug Fixes
+
+* fix(tools): keep fenced tool calls intact when payload strings contain fences
+
+  processCodeFenceState closed a fence at the first triple backtick, even
+  when it sat inside a JSON string value (user:write of markdown with code
+  blocks). The call was cut mid-JSON and the proxy died on the fragments.
+
+  JSON fences (buffer starts with an opening brace) are now scanned with
+  string/escape awareness across chunk boundaries: a fence inside a JSON
+  string is content, the fence closes only on one outside a string.
+  Plain markdown fences keep the legacy first-close behavior; the doubled
+  json-opener quirk stays handled. Remaining partial fences at the tail are
+  held until more characters arrive, so a closer split across chunks works.
+
+  Seven regression tests: odd/even inner fences, split closer, plain-fence
+  legacy behavior, escape directly before an inner fence, 4+/5+ tick runs
+  inside strings, and unclosed-fence finalize salvage.
+
 ## [0.7.0-dev.3](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.2...v0.7.0-dev.3) (2026-11-04)
 
 ### Bug Fixes
