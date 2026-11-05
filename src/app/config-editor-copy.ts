@@ -594,6 +594,21 @@ export const FIELD_DEPENDENCIES: Record<string, FieldDependency> = {
 
 const DEFAULT_HINT = 'See config.defaults.yaml and docs/config.md.';
 
+/** Render priority within a category: lower sorts first, unmatched keeps
+ * document order (stable sort). Keeps drop-in modules below the base prompts
+ * they extend, no matter where they sit in the YAML. */
+const FIELD_ORDER: Array<[prefix: string, order: number]> = [
+  ['server.instructions.', 0],
+  ['server.customTools.modules.', 1],
+];
+
+export function fieldOrderKey(path: string): number {
+  for (const [prefix, order] of FIELD_ORDER) {
+    if (path.startsWith(prefix)) return order;
+  }
+  return Number.MAX_SAFE_INTEGER;
+}
+
 export const SECRET_PATHS = new Set(
   Object.entries(COPY).filter(([, copy]) => copy.kind === 'secret').map(([path]) => path),
 );

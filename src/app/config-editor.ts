@@ -9,6 +9,7 @@ import {
   SECRET_PATHS,
   fieldCopy,
   fieldCategory,
+  fieldOrderKey,
   humanLabel,
   choicesFor,
   FIELD_DEPENDENCIES,
@@ -149,6 +150,7 @@ export function walkConfigFields(
   }
 
   walk(defaults, '');
+  fields.sort((a, b) => fieldOrderKey(a.path) - fieldOrderKey(b.path));
   return fields;
 }
 

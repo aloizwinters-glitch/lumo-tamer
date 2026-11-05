@@ -65,6 +65,20 @@ describe('walkConfigFields', () => {
     expect(fieldCategory('server.promptTokenEstimationFactor')).toBe('expertCompaction');
   });
 
+  it('renders base prompts above drop-in modules regardless of YAML position', () => {
+    // YAML order here mirrors the real defaults: customTools (modules) first.
+    const fields = walkConfigFields({
+      server: {
+        customTools: { modules: { homeAssistant: { enabled: false, prompt: 'ha' } } },
+        instructions: { forTools: 'protocol' },
+      },
+    }, {});
+    const idxForTools = fields.findIndex((f) => f.path === 'server.instructions.forTools');
+    const idxHaEnabled = fields.findIndex((f) => f.path === 'server.customTools.modules.homeAssistant.enabled');
+    expect(idxForTools).toBeGreaterThanOrEqual(0);
+    expect(idxHaEnabled).toBeGreaterThan(idxForTools);
+  });
+
   it('aliases CLI injectInto copy and keeps a distinct label', () => {
     const fields = walkConfigFields({
       server: { instructions: { injectInto: 'last' } },
