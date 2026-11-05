@@ -386,8 +386,9 @@ function renderConfigPage(isAuthenticated: boolean): string {
             visible = depInfo.showValues.includes(valueFor(parent));
           }
         }
-        const current = field.kind !== 'secret'
-          && JSON.stringify(valueFor(field)) === JSON.stringify(field.defaultValue);
+        const current = field.kind === 'secret'
+          ? atDefault(field)
+          : JSON.stringify(valueFor(field)) === JSON.stringify(field.defaultValue);
         const over = field.kind !== 'secret' && !current ? '<span class="over">changed</span>' : '';
         const bool = field.kind === 'boolean' ? ' bool' : '';
         const dep = field.dependsOn ? ' dependent' : '';
@@ -397,9 +398,9 @@ function renderConfigPage(isAuthenticated: boolean): string {
         html += extraBlock(field);
         html += '<div class="controls"><div class="control">' + inputFor(field) + '</div>';
         html += '<div class="actions">';
-        if (field.kind !== 'secret' && !field.noDefault) {
+        if (field.clearable || (field.kind !== 'secret' && !field.noDefault)) {
           html += '<button type="button" class="btn-default' + (current ? ' is-current' : ' is-reset')
-            + '" data-reset="' + field.path + '">Default</button>';
+            + '" data-reset="' + field.path + '">' + (field.clearable ? 'Clear' : 'Default') + '</button>';
         }
         html += '<button type="button" class="btn-undo" data-undo="' + field.path + '"'
           + (pending(field.path) ? '' : ' hidden') + '>Undo</button>';
@@ -461,6 +462,15 @@ function renderConfigPage(isAuthenticated: boolean): string {
         if (undo) undo.hidden = !pending(path);
         const over = row.querySelector('.over');
         if (over) over.remove();
+        if (field.clearable) {
+          const btn = row.querySelector('[data-reset]');
+          if (btn) {
+            const def = atDefault(field);
+            btn.classList.toggle('is-current', def);
+            btn.classList.toggle('is-reset', !def);
+            btn.title = def ? 'No token set' : 'Remove the token';
+          }
+        }
         return;
       }
       const current = atDefault(field);
@@ -687,7 +697,7 @@ function renderConfigPage(isAuthenticated: boolean): string {
     function onReset(ev) {
       const path = ev.currentTarget.getAttribute('data-reset');
       const field = fields.find((f) => f.path === path);
-      if (!field || field.kind === 'secret') return;
+      if (!field || (field.kind === 'secret' && !field.clearable)) return;
       if (atDefault(field) && !pending(path)) return;
       applyValue(field, field.defaultValue);
       dirty.delete(path);

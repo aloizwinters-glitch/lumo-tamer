@@ -302,6 +302,12 @@ const COPY: Record<string, FieldCopy> = {
       { label: 'Example', value: '/var/run/docker.sock' },
     ],
   },
+  'updates.githubToken': {
+    label: 'GitHub API token',
+    hint: 'Optional PAT. Raises the release-check rate limit from 60 to 5000 req/h. Env GITHUB_TOKEN works too.',
+    more: 'Anonymous GitHub API is limited to ~60 requests per hour per IP; the periodic release check can exhaust that and the chip shows a 403. A fine-grained read-only token (no scopes needed for public repos) fixes it. Saved into config.yaml, which is never synced by updates. This page never displays the current value; saving with the field empty keeps the existing token — use Clear to remove it.',
+    kind: 'secret',
+  },
   'commands.wakeword': {
     label: 'Wakeword',
     hint: 'Spoken prefix instead of a slash, so voice clients do not steal /help.',
@@ -583,6 +589,7 @@ export const FIELD_DEPENDENCIES: Record<string, FieldDependency> = {
   'updates.checkIntervalHours': { parent: 'updates.enabled', showValues: [true] },
   'updates.autoApply': { parent: 'updates.enabled', showValues: [true] },
   'updates.dockerSocket': { parent: 'updates.enabled', showValues: [true] },
+  'updates.githubToken': { parent: 'updates.enabled', showValues: [true] },
 };
 
 const DEFAULT_HINT = 'See config.defaults.yaml and docs/config.md.';

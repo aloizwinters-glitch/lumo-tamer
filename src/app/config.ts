@@ -170,6 +170,8 @@ const updatesConfigSchema = z.object({
   checkIntervalHours: z.number().min(UPDATES.CHECK_INTERVAL_HOURS_MIN).max(UPDATES.CHECK_INTERVAL_HOURS_MAX),
   autoApply: z.boolean(),
   dockerSocket: z.string(),
+  /** Optional GitHub PAT. Raises the API rate limit for release checks. */
+  githubToken: z.string().optional(),
 });
 
 const sharedMergedFields = {

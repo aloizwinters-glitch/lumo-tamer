@@ -251,6 +251,18 @@ export function emptyStatus(error: string | null = null): UpdateStatus {
   };
 }
 
+/** Bearer auth when a GitHub token is configured (config first, then GITHUB_TOKEN env). */
+function githubAuthHeaders(): Record<string, string> {
+  let token: string | undefined;
+  try {
+    token = getUpdatesConfig().githubToken;
+  } catch {
+    // config not loaded — env fallback still applies
+  }
+  token ??= process.env.GITHUB_TOKEN;
+  return token && token.trim() ? { Authorization: `Bearer ${token.trim()}` } : {};
+}
+
 export async function fetchBranchVersion(
   repository: string,
   branch: 'main' | 'dev',
@@ -258,7 +270,7 @@ export async function fetchBranchVersion(
 ): Promise<string | null> {
   const repo = parseRepository(repository);
   const res = await fetcher(`https://raw.githubusercontent.com/${repo}/${branch}/package.json`, {
-    headers: { 'User-Agent': `${APP.NAME}/${VERSION}` },
+    headers: { 'User-Agent': `${APP.NAME}/${VERSION}`, ...githubAuthHeaders() },
   });
   if (!res.ok) return null;
   try {
@@ -281,6 +293,7 @@ export async function fetchGithubReleases(
         Accept: GITHUB.ACCEPT,
         'User-Agent': `${APP.NAME}/${VERSION}`,
         'X-GitHub-Api-Version': GITHUB.API_VERSION,
+        ...githubAuthHeaders(),
       },
     },
   );

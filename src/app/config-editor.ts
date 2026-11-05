@@ -61,6 +61,8 @@ export interface ConfigField {
   choices?: string[];
   dependsOn?: string;
   noDefault?: boolean;
+  /** Secret with an empty default: shows a Clear button so the value can be removed. */
+  clearable?: boolean;
 }
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -142,6 +144,7 @@ export function walkConfigFields(
       ...(copy.choices ? { choices: copy.choices } : {}),
       ...(parentDependsOn ? { dependsOn: parentDependsOn } : {}),
       ...(noDefault ? { noDefault: true } : {}),
+      ...(kind === 'secret' && defaultValue === '' ? { clearable: true } : {}),
     });
   }
 

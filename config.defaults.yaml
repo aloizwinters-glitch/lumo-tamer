@@ -111,6 +111,9 @@ updates:
   autoApply: false
   # Host docker.sock, bind-mounted into this container (see docker-compose.yml)
   dockerSocket: "/var/run/docker.sock"
+  # Optional GitHub PAT for release checks (60 -> 5000 req/h). Env GITHUB_TOKEN works too.
+  # Leave empty to use anonymous access (or the GITHUB_TOKEN env var).
+  githubToken: ""
 
 # Server Configuration
 server:
