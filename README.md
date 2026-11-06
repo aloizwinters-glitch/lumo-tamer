@@ -29,6 +29,8 @@ This tree is a fork of [ZeroTricks/lumo-tamer](https://github.com/ZeroTricks/lum
 
 ## Features
 
+- The `/config` web editor: category sidebar with search, per-field Default/Undo, config **export/import** as portable JSON (secrets opt-in), live toasts, dark/light theme.
+- The `/logs` live log viewer: redacted ring buffer, level filter, pause/clear/auto-scroll.
 - OpenAI-compatible API server with experimental tool support.
 - Select the Lumo 2.0 model tier (Lite/Max) and thinking mode per request, via the OpenAI `model` and `reasoning_effort` fields.
 - Interactive CLI, let Lumo help you execute commands, read, create and edit files.
@@ -183,6 +185,7 @@ Both CLI and API accept slash commands (or the `commands.wakeword` prefix, defau
 | `/load <id>` | Load a conversation from Proton by ID (needs sync) |
 | `/private` | Keep this conversation local; do not sync |
 | `/refreshtokens` | Manually refresh auth tokens (usually unnecessary) |
+| `/update` | Check GitHub for a newer release (`/update apply` pulls and recreates, needs docker.sock) |
 | `/logout` | Revoke session, delete tokens, then exit the process |
 | `/quit` | Exit the app (CLI only; runs `/save` if sync is on) |
 
@@ -240,7 +243,7 @@ cli:
 lumo-tamer maps standard OpenAI request fields to Lumo 2.0's model tier and answer mode:
 
 - `model`: `lumo` (Proton auto-routes), `lumo-lite`, `lumo-max`, or `apertus-15`. `apertus` and `apertus-1.5` map to `apertus-15`. These are advertised on `/v1/models`; an unknown model returns HTTP 400.
-- `reasoning_effort`: `high` (also `low`/`medium`) turns on thinking mode, `none` turns it off. In the Responses API, use `reasoning.effort` instead.
+- `reasoning_effort`: accepts `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `default`. `high`/`xhigh` turn thinking on, `none`/`minimal` turn it off (aliases exist for client compatibility, e.g. OpenCode's per-model toggle), `default` uses the configured default. In the Responses API, use `reasoning.effort` instead.
 
 Defaults and surfacing are configurable:
 
@@ -259,7 +262,9 @@ server:
     surfaceThinking: false
 ```
 
-Add your own names that pick a real Lumo tier and a thinking default. They show up on `/v1/models`. A request `reasoning_effort` still wins.
+Add your own names that pick a real Lumo tier and a thinking default. They show up on `/v1/models`. A request `reasoning_effort` still wins, unless the entry sets `pinned: true` — pinned models force their mode and ignore the client's effort.
+
+With `server.reasoning.autoVariants: true` (default), every allowed model also gets an automatically advertised `-thinking` twin that always thinks, even when a client sends `reasoning_effort: "none"`.
 
 ```yaml
 server:
@@ -367,7 +372,7 @@ The server implements a subset of OpenAI-compatible endpoints and has so far bee
 |----------|-------------|
 | `POST /v1/chat/completions` | [OpenAI chat completions](https://platform.openai.com/docs/api-reference/chat/create) (`response_format` json_schema / json_object is emulated) |
 | `POST /v1/responses` | [OpenAI responses API](https://platform.openai.com/docs/api-reference/responses/create) |
-| `GET /v1/models` | List available models (`lumo`, `lumo-lite`, `lumo-max`, `apertus-15`) |
+| `GET /v1/models` | List available models (`lumo`, `lumo-lite`, `lumo-max`, `apertus-15`; `-thinking` variants appear automatically when `reasoning.autoVariants` is on). Each entry includes `context_window` (131072) and `max_tokens` (13107) |
 | `GET /v1/models/:id` | Single model |
 | `GET /health` | Health check (`status`, version, queue, auth, update) |
 | `GET /v1/update` | GitHub update check (`?refresh=1` to bypass cache) |
@@ -377,7 +382,11 @@ The server implements a subset of OpenAI-compatible endpoints and has so far bee
 | `POST /auth/logout` | Sign out (no API key; server stays up) |
 | `GET /config` | Edit `config.yaml` (toggles / text; API key is write-only) |
 | `GET /v1/config` | Config fields as JSON (`server.apiKey` is never returned) |
-| `PUT /v1/config` | Save selected keys or `{ resetAll: true }` (keeps apiKey), then restart |
+| `PUT /v1/config` | Save selected keys or `{ resetAll: true }` (keeps apiKey); hot-reloads in-memory settings (restart only needed for the listen port) |
+| `GET /v1/config/export` | JSON snapshot of every override (`?secrets=true` to include them) |
+| `POST /v1/config/import` | Merge a snapshot (`{ snapshot, dryRun }` — dryRun validates and reports without writing) |
+| `GET /logs` | Live log viewer page (level filter, search, auto-scroll) |
+| `GET /v1/logs` | Log stream (SSE, `?level=` filter; redacted ring buffer) |
 | `GET /v1/auth/status` | Session / sync-capability |
 | `POST /v1/auth/refresh` | Force token refresh |
 | `POST /v1/auth/logout` | Revoke session and exit the process |

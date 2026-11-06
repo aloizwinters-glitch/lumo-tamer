@@ -6,6 +6,8 @@ Use **`lumo-max`** for coding (GLM). Thinking is on by default for that model. K
 
 Lumo's window is **128.0K tokens** (the in-app meter). Integer form: `limit.context` **131072**, `limit.output` **13107** (12.8K reserved to keep chatting). The proxy does not expose that meter; without these limits OpenCode auto-compaction never runs. Details: [README: Context window](../README.md#context-window).
 
+The default `server.models.allowedModels` are `lumo`, `lumo-lite`, `lumo-max`, and `apertus-15` (Apertus 1.5). With `server.reasoning.autoVariants: true` (the default), `/v1/models` additionally advertises a pinned `-thinking` variant for each (`lumo-thinking`, `lumo-max-thinking`, …) — each one thinks even when a client sends `reasoning_effort: "none"`, which is exactly what OpenCode's per-model thinking toggle sends. Aliases: `apertus` / `apertus-1.5` → `apertus-15`.
+
 Add Lumo to `provider` in your OpenCode `opencode.json` / `opencode.jsonc`:
 
 ```json
@@ -24,6 +26,14 @@ Add Lumo to `provider` in your OpenCode `opencode.json` / `opencode.jsonc`:
         "lumo-max": {
           "name": "lumo-max",
           "limit": { "context": 131072, "output": 13107 }
+        },
+        "apertus-15": {
+          "name": "Apertus 1.5",
+          "limit": { "context": 131072, "output": 13107 }
+        },
+        "lumo-max-thinking": {
+          "name": "lumo-max (always thinking)",
+          "limit": { "context": 131072, "output": 13107 }
         }
       },
       "name": "Lumo (local)",
@@ -36,3 +46,5 @@ Add Lumo to `provider` in your OpenCode `opencode.json` / `opencode.jsonc`:
   }
 }
 ```
+
+The proxy reports `context_window` (131072) and `max_tokens` (13107) in each `/v1/models` entry, but keep the explicit `limit` block — OpenCode does not reliably auto-discover them. `reasoning_effort` accepts `none / minimal / low / medium / high / xhigh / default` (`minimal` and `xhigh` are OpenCode-compat aliases); your `server.reasoning.default` applies when the request sends none or `default`.

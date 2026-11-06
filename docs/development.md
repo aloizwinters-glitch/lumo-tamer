@@ -63,8 +63,8 @@ Any OpenAI-compatible client works against the dev server. For OpenCode specific
 ```bash
 npm run build                # TypeScript compilation + alias resolution
 
-# Optional: Go binary for login auth method
-cd src/auth/login/go && go build -o ../../../../dist/proton-auth && cd -
+# Optional: Go binary for the login auth method
+npm run build:login          # or build:all (TS + Go)
 ```
 
 ## Project Structure
@@ -76,17 +76,29 @@ packages/
 src/
 ├── tamer.ts                   # Entry point (CLI, server, auth)
 ├── api/                       # OpenAI-compatible API
-│   └── routes/                # /v1/responses, /v1/chat/completions, etc.
+│   ├── routes/                # /v1/responses, /v1/chat-completions, /v1/config (+export/import),
+│   │                          # /v1/logs, /v1/update, /v1/models, /v1/auth/*, /health, /metrics
+│   ├── tools/                 # Custom-tool detection, streaming tool-call scanner, bounce logic
+│   └── web-ui.ts              # Shared page shell (theme, chips, toasts)
 ├── app/                       # Shared application logic
-│   ├── config.ts              # Configuration management
-│   ├── commands.ts            # Slash commands (/save, /help, /logout, etc.)
+│   ├── config.ts              # Configuration management + schema
+│   ├── config-editor.ts       # /config field walker, edit planner, YAML document writer
+│   ├── config-editor-copy.ts  # Labels/hints/categories for /config
+│   ├── config-transfer.ts     # Config export/import snapshots
+│   ├── config-file.ts         # config.yaml read/write (comment-preserving)
+│   ├── updates.ts             # GitHub release checks + channel tracks
+│   ├── docker-update.ts       # docker.sock self-update (pull + one-shot updater)
+│   ├── log-broadcast.ts       # Redacted ring buffer feeding /v1/logs
+│   ├── commands.ts            # Slash commands (/save, /help, /logout, /update, etc.)
+│   ├── token-estimate.ts      # prompt_tokens estimation (OpenCode compaction)
 │   └── logger.ts              # Pino logger
 ├── cli/                       # CLI client (interactive mode, file ops, code execution)
-├── auth/                      # Authentication (browser, login, rclone)
+│   └── local-actions/         # bash/read/edit block handlers
+├── auth/                      # Authentication (login, browser, rclone)
 │   ├── browser/               # CDP-based browser token extraction
 │   ├── login/                 # Go SRP binary integration
 │   ├── rclone/                # Rclone config parsing
-│   └── vault/                 # Encrypted credential storage
+│   └── vault/                 # Encrypted credential storage (symlink-safe atomic writes)
 ├── lumo-client/               # Bridge to Proton. Chat is U2L-encrypted by default
 ├── mock/                      # Mock mode: simulated API responses (encryption off)
 ├── conversations/             # Store + optional Proton sync (AEAD when sync is on)
@@ -94,6 +106,8 @@ src/
 │   └── fallback/sync/         # Default store; encryption-codec.ts for synced payloads
 └── shims/                     # Non-Proton polyfills (IndexedDB, lodash, etc.)
 ```
+
+Note: CI pins Node 22; `package.json` has no `engines` field, so older Node versions are untested rather than forbidden.
 
 See [upstream.md](upstream.md) for details on upstream files and shims.
 

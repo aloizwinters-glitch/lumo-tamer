@@ -36,7 +36,10 @@ updates:
   checkIntervalHours: 6
   autoApply: false
   dockerSocket: "/var/run/docker.sock"
+  githubToken: ""   # optional PAT
 ```
+
+**`githubToken`** (optional): the anonymous GitHub API allows ~60 requests per hour per IP — enough for manual checks, but a short `checkIntervalHours` can exhaust it and the header chip then reports 403. A fine-grained personal access token (read-only, no scopes needed for public repos) raises the limit to 5000/h. The config value wins over a `GITHUB_TOKEN` environment variable. It is treated like the API key: never shown in the browser, blank-save keeps it, **Clear** removes it. See [Settings → Updates → General](config.md).
 
 **Save** on `/config` reloads `updates.*` in the running process and the header chip re-checks GitHub. No Restart for a channel change. Listen port still needs Restart.
 
@@ -65,7 +68,9 @@ tamer update apply
 # chat: /update   /update apply
 ```
 
-The header on `/auth` and `/config` always shows **Updates** / **Up to date**. Click to re-check GitHub. When a newer release exists it becomes **Update to …** (confirm, then recreate).
+The header on `/auth` and `/config` always shows **Updates** / **Up to date**. Click to re-check GitHub. When a newer release exists it becomes **Update to …** (confirm, then recreate). **Shift+click** the chip force-pulls the current channel image even without a version change (same as `POST /v1/update?force=1`) — the escape hatch when a tag was re-built.
+
+Apply is rate-limited: repeated `POST /v1/update` calls answer 429 after a few attempts. Saving `updates.channel` on `/config` makes the chip re-check immediately; saving other `updates.*` values (interval, token) does not.
 
 ## Manual
 

@@ -61,10 +61,20 @@ The first SRP attempt uses Lumo's own app version (`web-lumo`). `login.appVersio
 - **No Proton chat history**: `/auth` (password or Proton sign-in) does not sync threads to or from lumo.proton.me. Use `tamer auth browser` for that.
 - **TOTP only** (password form): authenticator codes, not security keys
 
+### Proton desktop sign-in (used on CAPTCHA / 2028)
+
+When the password API is blocked (CAPTCHA after retries, 2028 abuse lock), `/auth` falls back to Proton's desktop sign-in. Flow:
+
+1. `/auth` creates a **session fork** on Proton's API (trying `lumo.proton.me/api` with app `lumo`, then `mail.proton.me/api` with `proton-lumo`).
+2. It shows the URL `account.proton.me/desktop/login` — open it on **any device** (phone is fine) and approve.
+3. Meanwhile tamer polls the fork; on approval it decrypts the payload (AES-256-GCM) and writes the vault. The pending fork expires after **10 minutes** — just start over if it lapses.
+
+The resulting tokens are Drive-scoped when obtained via the mail endpoint: API chat works, lumo.proton.me history does not (same as the password path). If sync keys are missing, tamer generates local ones so the vault stays usable.
+
 ### Troubleshooting
 
 **"proton-auth binary not found"**
-- Build it: `cd src/auth/login/go && go build -o ../../../../dist/proton-auth && cd -`
+- Build it: `npm run build:login` (or `build:all`)
 
 **"Authentication failed"**
 - Verify username/password
@@ -290,7 +300,9 @@ All methods store a `refreshToken` and use Proton's `/auth/refresh` endpoint:
 - On a schedule (every `intervalHours`)
 - On 401 errors (if `onError: true`)
 
-If Proton rejects the refresh (401/403/422) or there is no refresh token, tamer **drops the session**: the vault is deleted, chat returns 503, `/health` shows `auth.available: false`, and `/auth` shows the login form with “Proton session expired… Log in again.” That is the re-login. Transient errors (network, 5xx) retry; three failures in a row also drop the session.
+If Proton rejects the refresh (401/403/422) or there is no refresh token, tamer **drops the session**: the vault is deleted, chat returns 503, `/health` shows `auth.available: false`, and `/auth` shows the login form with “Proton session expired… Log in again.” That is the re-login. Transient errors (network, 5xx) retry; three failures in a row also drop the session. When the refresh token is already dead, the remote revoke is deliberately skipped (nothing left to revoke) — the vault disappears without a call to Proton.
+
+**Shared vault setups:** the atomic vault write follows symlinks, so a symlinked `sessions/vault.enc` (several instances sharing one login, slot-style setups) always lands on the link target and survives restarts.
 
 Do not expect `/auth` to stay “signed in” with a dead refresh token. Log in on that page (or the Docker sidecar if Proton 2028 blocks the password form).
 
