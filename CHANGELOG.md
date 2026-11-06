@@ -1,3 +1,26 @@
+## [0.7.0-dev.11](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.10...v0.7.0-dev.11) (2026-11-06)
+
+### Features
+
+* feat(config): export and import config as portable JSON
+
+  New dialog on /config: Export snapshots every override that differs
+  from the defaults into a single JSON blob (copy/paste or clipboard);
+  Import merges such a snapshot back, through the same validation
+  pipeline as the form saves.
+
+  - config-transfer.ts: snapshot builder, strict parser with clear error
+    messages, version-aware migration table (empty for now, extends as
+    paths get renamed), type coercion via coerceFieldValue
+  - Validate (dry-run) reports a per-path diff: old local value -> new
+    value for every overwrite, no-ops counted separately
+  - Secrets opt-in on export (checkbox), empty secrets never imported,
+    unknown paths dropped with a report instead of failing the import
+  - GET /v1/config/export, POST /v1/config/import with dryRun:true for
+    the Validate/preview step; import is rate-limited like saves
+
+  Tests: 551 passed (10 new).
+
 ## [0.7.0-dev.10](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.9...v0.7.0-dev.10) (2026-11-06)
 
 ### Features
