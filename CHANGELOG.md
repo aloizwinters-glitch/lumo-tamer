@@ -1,3 +1,14 @@
+## [0.7.0-dev.9](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.8...v0.7.0-dev.9) (2026-11-06)
+
+### Bug Fixes
+
+* fix(log-ui): collapse grid track so the feed scrolls internally
+
+  The 1fr row track never shrank below the feed content because grid
+  items default to min-height: auto. minmax(0, 1fr) plus min-height: 0
+  on .log-feed makes the pane the fixed viewport and the feed the only
+  scroll container, so scrollTop auto-scroll lands inside the box.
+
 ## [0.7.0-dev.8](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.7...v0.7.0-dev.8) (2026-11-06)
 
 ### Bug Fixes
