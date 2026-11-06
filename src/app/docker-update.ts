@@ -171,6 +171,7 @@ export async function recreateContainer(
     const started = await docker(socketPath, 'POST', `/containers/${newId}/start`);
     assertOk(started, 'Start replacement');
     await docker(socketPath, 'DELETE', `/containers/${id}?force=1`);
+    await pruneOldImages(socketPath, imageRef);
   } catch (error) {
     logger.error({ error }, 'Recreate failed; trying to start the old container');
     await docker(socketPath, 'POST', `/containers/${id}/rename?name=${encodeURIComponent(bare)}`).catch(() => undefined);
@@ -206,6 +207,51 @@ export async function pullAndSpawnHelper(
   const started = await docker(socketPath, 'POST', `/containers/${helperId}/start`);
   assertOk(started, 'Start updater helper');
   logger.info({ helperId: helperId.slice(0, 12), name, imageRef }, 'Updater helper started');
+}
+
+/**
+ * Best-effort deletion of leftover images from previous updates of the same
+ * repository. Frequent dev releases accumulate hundreds of MB per tag and
+ * eventually fill the host disk ("no space left on device" on the next pull).
+ * Anything a container still references is kept; failures are logged and
+ * ignored — pruning must never break the update flow.
+ */
+export async function pruneOldImages(socketPath: string, newImageRef: string): Promise<void> {
+  try {
+    const { fromImage } = splitImageRef(newImageRef);
+    const list = await docker(
+      socketPath,
+      'GET',
+      `/images/json?filters=${encodeURIComponent(JSON.stringify({ reference: [fromImage] }))}`,
+    );
+    if (list.status < 200 || list.status >= 300 || !Array.isArray(list.json)) return;
+
+    // Every image id any container references (running or stopped) stays.
+    const allContainers = await docker(socketPath, 'GET', '/containers/json?all=1');
+    const inUse = new Set<string>();
+    if (allContainers.status >= 200 && allContainers.status < 300 && Array.isArray(allContainers.json)) {
+      for (const c of allContainers.json as Array<{ ImageID?: string }>) {
+        if (c.ImageID) inUse.add(c.ImageID);
+      }
+    }
+
+    const newRef = newImageRef.toLowerCase();
+    let freed = 0;
+    for (const img of list.json as Array<{ Id: string; RepoTags?: string[] }>) {
+      if (inUse.has(img.Id)) continue;
+      const tags = (img.RepoTags ?? []).map((t) => t.toLowerCase());
+      // Keep the just-deployed ref; dangling layers (no tags) are fair game.
+      if (tags.includes(newRef)) continue;
+      const del = await docker(socketPath, 'DELETE', `/images/${img.Id}`);
+      if (del.status >= 200 && del.status < 300) {
+        freed++;
+        logger.info({ image: img.RepoTags?.[0] ?? img.Id.slice(0, 19) }, 'Pruned old update image');
+      }
+    }
+    if (freed > 0) logger.info({ freed }, 'Old update images pruned');
+  } catch (error) {
+    logger.warn({ error }, 'Image prune failed (non-fatal)');
+  }
 }
 
 export function selfContainerName(): string {
