@@ -60,7 +60,7 @@ export function createLogsRouter() {
     const extraCss = `
       .log-pane {
         display: grid; grid-template-rows: auto 1fr; gap: 0.75rem;
-        min-height: calc(100vh - 12rem);
+        height: calc(100vh - 12rem);
       }
       .log-toolbar {
         display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;
