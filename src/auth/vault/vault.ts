@@ -9,7 +9,7 @@
  * Inspired by proton-bridge vault implementation.
  */
 
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, statSync, renameSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, statSync, renameSync, realpathSync } from 'fs';
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 import { dirname } from 'path';
 import { logger } from '../../app/logger.js';
@@ -130,14 +130,24 @@ export async function writeVault(vaultPath: string, tokens: StoredTokens, keyCon
         );
     }
 
-    // Atomic write: write to temp file, then rename
-    const tempPath = `${vaultPath}.tmp`;
+    // Atomic write: write to temp file, then rename. Resolve symlinks
+    // first — renaming over a symlink would replace the link with a real
+    // file, silently breaking shared-vault setups (slots linking to one
+    // master vault).
+    let targetPath = vaultPath;
+    try {
+      if (existsSync(vaultPath)) targetPath = realpathSync(vaultPath);
+    } catch {
+      // Broken link or unreadable target: write over the link itself, same as before.
+    }
+
+    const tempPath = `${targetPath}.tmp`;
     writeFileSync(tempPath, ciphertext, { mode: 0o600 });
 
     // Rename (atomic on most filesystems)
-    renameSync(tempPath, vaultPath);
+    renameSync(tempPath, targetPath);
 
-    logger.debug({ vaultPath }, 'Tokens written to vault');
+    logger.debug({ vaultPath: targetPath }, 'Tokens written to vault');
 }
 
 /**
