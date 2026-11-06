@@ -1,4 +1,5 @@
 import { spawn } from 'child_process';
+import type { Server } from 'http';
 import { readFileSync, utimesSync, watch } from 'fs';
 import express from 'express';
 import { parseDocument } from 'yaml';
@@ -27,6 +28,7 @@ import { VERSION } from '../app/version.js';
 
 export class APIServer {
   private expressApp: express.Application;
+  private httpServer?: Server;
   private serverConfig = getServerConfig();
   private queue = new RequestQueue(1); // Process one request at a time
   private metrics: MetricsService | null = null;
@@ -88,7 +90,7 @@ export class APIServer {
     this.expressApp.use(createLogsRouter());
     this.expressApp.use(createConfigRouter(this.app, {
       onSaved: () => {
-        restartAfterConfigSave();
+        restartAfterConfigSave(this.httpServer);
       },
     }));
 
@@ -114,7 +116,7 @@ export class APIServer {
     validateTemplateOnce(this.serverConfig.instructions.template);
 
     return new Promise((resolve) => {
-      this.expressApp.listen(this.serverConfig.port, () => {
+      this.httpServer = this.expressApp.listen(this.serverConfig.port, () => {
         logger.info('========================================');
         logger.info(`lumo-tamer v${VERSION} is ready!`);
         logger.info(`  base_url: http://localhost:${this.serverConfig.port}/v1`);
@@ -165,7 +167,7 @@ function watchConfigForReload(): void {
 }
 
 /** Docker/k8s restart the PID. Local `tsx watch` only restarts on file changes. */
-function restartAfterConfigSave(): void {
+function restartAfterConfigSave(httpServer?: Server): void {
   logger.info('Restart triggered — shutting down...');
   if (isContainerEnv()) {
     process.exit(0);
@@ -182,8 +184,20 @@ function restartAfterConfigSave(): void {
     process.exit(0);
   }
   logger.info('Not in Docker/tsx-watch — respawning self');
-  respawnSelf();
-  process.exit(0);
+  if (!httpServer) {
+    respawnSelf();
+    process.exit(0);
+  }
+  let respawned = false;
+  const respawn = (): void => {
+    if (respawned) return;
+    respawned = true;
+    respawnSelf();
+    process.exit(0);
+  };
+  try { httpServer.closeAllConnections(); } catch { /* pre-18.2 Node */ }
+  httpServer.close(respawn);
+  setTimeout(respawn, 2000).unref();
 }
 
 function parentIsTsxWatch(): boolean {
