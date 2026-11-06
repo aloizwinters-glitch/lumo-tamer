@@ -1,3 +1,14 @@
+## [0.7.0-dev.8](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.7...v0.7.0-dev.8) (2026-11-06)
+
+### Bug Fixes
+
+* fix(log-ui): constrain log-feed height, enable proper auto-scroll
+
+  Changed .log-pane from min-height to height to enforce a fixed viewport.
+  Added max-height: 100% to .log-feed so it becomes the scroll container.
+  Result: logs scroll within the box, not the whole page, and scrollTop-based
+  auto-scroll works correctly.
+
 ## [0.7.0-dev.7](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.6...v0.7.0-dev.7) (2026-11-06)
 
 ### Bug Fixes
