@@ -386,6 +386,26 @@ describe('StreamingToolDetector', () => {
 });
 
 describe('nested fences in tool-call payloads', () => {
+  it('re-emits a non-tool fence with its closer on its own line', () => {
+    // Live failure seen in the wild: the model closed a plain code block inline
+    // ('...dev.3)```'), the re-emitted closer glued to the body and the client
+    // rendered everything after as fake code, leaving a lone ``` on screen.
+    const { allText, allToolCalls } = processAll(new StreamingToolDetector(), [
+      'Branch-Lage\n\n```\nai/dev: c54b0ba phase 2\n        4e3c5da = origin/dev (5.13.1-dev.3)```\n\nDone.',
+    ]);
+    expect(allToolCalls).toEqual([]);
+    expect(allText).toContain('```\nai/dev: c54b0ba phase 2\n        4e3c5da = origin/dev (5.13.1-dev.3)\n```');
+    expect(allText).toContain('\n\nDone.');
+  });
+
+  it('appends a closer when a plain fence never closes before the stream ends', () => {
+    const { allText, allToolCalls } = processAll(new StreamingToolDetector(), [
+      'Some intro\n\n```\nunterminated code block, stream ends here',
+    ]);
+    expect(allToolCalls).toEqual([]);
+    expect(allText).toContain('unterminated code block, stream ends here\n```');
+  });
+
   it('treats ``` inside JSON string arguments as content', () => {
     const detector = new StreamingToolDetector({ knownToolNames: ['write'] });
     const md = 'Intro\n\n```js\nconsole.log(1);\n```\n\nOutro';

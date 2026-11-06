@@ -282,7 +282,13 @@ export class StreamingToolDetector {
     } else if (this.buffer === '') {
       logger.debug('[tools] dropped empty json fence');
     } else {
-      result.textToEmit += '```\n' + this.buffer + '```';
+      // Re-emit as valid markdown: the closer must sit on its own line.
+      // An inline closer (text right before the ticks, as models often
+      // emit after a list line) never terminates the block in the
+      // client renderer, which then swallows the rest of the reply as
+      // fake code — seen live as the lone-fence reply corruption.
+      const body = this.buffer.replace(/\n+$/, '');
+      result.textToEmit += '```\n' + body + '\n```';
     }
     this.buffer = '';
   }
@@ -570,7 +576,11 @@ export class StreamingToolDetector {
             this.flushHistoryCall(result);
             return result;
           }
-          result.textToEmit += '```\n' + trackerBuffer;
+          // Unclosed fence at stream end: emit WITH a closer so the
+          // client never receives a lone ``` that swallows
+          // everything after it as fake code.
+          const body = trackerBuffer.replace(/\n+$/, '');
+          result.textToEmit += '```\n' + body + '\n```';
         } else {
           result.textToEmit += trackerBuffer;
         }
