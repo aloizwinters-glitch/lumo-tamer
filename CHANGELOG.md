@@ -1,3 +1,25 @@
+## [0.7.0-dev.15](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.14...v0.7.0-dev.15) (2026-11-06)
+
+### Bug Fixes
+
+* fix(tools): never emit a lone or inline code-fence closer
+
+  Non-tool code blocks were re-emitted with the closing fence glued
+  directly to the last content character. When the model closes inline
+  (text right before the ticks), the re-emitted closer is not a valid
+  fence terminator for markdown renderers — the block stays open and
+  swallows the rest of the reply as fake code. Seen live as stray
+  three backticks and literal **bold** markers in OpenCode.
+
+  - completeCodeFence: re-emit as valid markdown with the closer on its
+    own line (trailing newlines trimmed from the body)
+  - finalize: an unclosed fence at stream end now gets a closer appended
+    instead of leaving a lone opener behind
+  - two regression tests reconstruct the live incident (inline closer
+    after a branch-lage list, and an unterminated block at stream end)
+
+  Tests: 556 passed.
+
 ## [0.7.0-dev.14](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.13...v0.7.0-dev.14) (2026-11-06)
 
 ### Features
