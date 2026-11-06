@@ -17,7 +17,7 @@ const LOGOUT_BIND = `(function(){var btn=document.getElementById('logout');if(!b
 // Header restart button (both pages). Distinct id: the config pane has its own restartBtn.
 const RESTART_BIND = `(function(){var btn=document.getElementById('uiRestartBtn');if(!btn)return;btn.addEventListener('click',function(){if(btn.disabled)return;if(!confirm('Restart the server now?'))return;btn.disabled=true;btn.style.opacity='0.5';fetch('/v1/restart',{method:'POST'}).catch(function(){}).then(function(){var tries=0;(function poll(){tries++;if(tries>60){alert('Server did not come back. Docker should restart it; if you started it by hand, start it again, then press F5.');return;}setTimeout(function(){fetch('/health',{cache:'no-store'}).then(function(r){if(r.ok){location.reload();}else{poll();}}).catch(function(){poll();});},500);})();});});})();`;
 
-const AUTH_STATUS_BIND = `(function(){var chip=document.getElementById('authChip');if(!chip)return;chip.hidden=false;chip.addEventListener('click',function(){location.href='/auth';});function toast(msg,ok){var c=document.getElementById('toast-container');if(!c)return;var el=document.createElement('div');el.className='toast '+(ok?'ok':'err');el.textContent=msg;c.appendChild(el);setTimeout(function(){el.style.opacity='0';el.style.transform='translateX(100%)';setTimeout(function(){el.remove();},300);},6000);}var was=null;function poll(){fetch('/health',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(d){var valid=!!(d&&d.auth&&d.auth.valid);chip.textContent=valid?'Signed in':'Not signed in';chip.title=valid?'Signed in to Proton':'Waiting for authentication — click to open /auth';chip.classList.toggle('ready',valid);chip.classList.toggle('err',!valid);if(was===true&&!valid)toast('Signed out — waiting for authentication',false);was=valid;}).catch(function(){chip.textContent='No server';chip.classList.add('err');chip.classList.remove('ready');});}poll();setInterval(poll,5000);})();`;
+const AUTH_STATUS_BIND = `(function(){var chip=document.getElementById('authChip');if(!chip)return;chip.hidden=false;chip.addEventListener('click',function(){location.href='/auth';});function toast(msg,ok){var c=document.getElementById('toast-container');if(!c)return;var el=document.createElement('div');el.className='toast '+(ok?'ok':'err');el.textContent=msg;el.title='Click to copy, then close';var gone=false;function bye(){if(gone)return;gone=true;el.style.opacity='0';el.style.transform='translateX(100%)';setTimeout(function(){el.remove();},300);}el.addEventListener('click',function(){try{navigator.clipboard.writeText(msg);}catch(e){}bye();});c.appendChild(el);if(ok)setTimeout(bye,6000);};var was=null;function poll(){fetch('/health',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(d){var valid=!!(d&&d.auth&&d.auth.valid);chip.textContent=valid?'Signed in':'Not signed in';chip.title=valid?'Signed in to Proton':'Waiting for authentication — click to open /auth';chip.classList.toggle('ready',valid);chip.classList.toggle('err',!valid);if(was===true&&!valid)toast('Signed out — waiting for authentication',false);was=valid;}).catch(function(){chip.textContent='No server';chip.classList.add('err');chip.classList.remove('ready');});}poll();setInterval(poll,5000);})();`;
 
 const UPDATE_BIND = `(function(){
   var chip = document.getElementById('updateChip');
@@ -32,12 +32,22 @@ const UPDATE_BIND = `(function(){
     var el = document.createElement('div');
     el.className = 'toast ' + (ok ? 'ok' : 'err');
     el.textContent = msg;
-    container.appendChild(el);
-    setTimeout(function() {
+    el.title = 'Click to copy, then close';
+    var gone = false;
+    function bye() {
+      if (gone) return;
+      gone = true;
       el.style.opacity = '0';
       el.style.transform = 'translateX(100%)';
       setTimeout(function() { el.remove(); }, 300);
-    }, 4500);
+    }
+    el.addEventListener('click', function() {
+      try { navigator.clipboard.writeText(msg); } catch (e) { /* insecure context */ }
+      bye();
+    });
+    container.appendChild(el);
+    // Errors stay until clicked: they carry details worth copying.
+    if (ok) setTimeout(bye, 4500);
   }
   function paint() {
     chip.hidden = false;
@@ -292,8 +302,14 @@ button.update-chip:disabled, button.auth-chip:disabled { opacity: 0.55; cursor: 
   padding: 0.75rem 1rem; background: var(--card); border: 1px solid var(--line);
   border-left: 4px solid var(--purple); border-radius: 6px;
   box-shadow: var(--shadow); font-size: 0.85rem; color: var(--text);
-  animation: toastIn 0.3s ease; min-width: 200px; max-width: 22rem;
+  animation: toastIn 0.3s ease; min-width: 200px; max-width: 34rem;
+  word-break: break-word; overflow-wrap: anywhere;
+  cursor: pointer; user-select: none;
   pointer-events: auto;
+}
+.toast.err {
+  border-left-color: var(--err);
+  /* Error toasts carry details worth copying; JS keeps them until clicked. */
 }
 .toast.ok { border-left-color: var(--ok); }
 .toast.err { border-left-color: var(--err); }

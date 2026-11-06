@@ -339,12 +339,22 @@ function renderConfigPage(isAuthenticated: boolean): string {
       const toast = document.createElement('div');
       toast.className = 'toast ' + type;
       toast.textContent = message;
-      container.appendChild(toast);
-      setTimeout(() => {
+      toast.title = 'Click to copy, then close';
+      let gone = false;
+      const bye = () => {
+        if (gone) return;
+        gone = true;
         toast.style.opacity = '0';
         toast.style.transform = 'translateX(100%)';
         setTimeout(() => toast.remove(), 300);
-      }, 3000);
+      };
+      toast.addEventListener('click', () => {
+        try { navigator.clipboard.writeText(message); } catch (_) { /* insecure context */ }
+        bye();
+      });
+      container.appendChild(toast);
+      // Errors stay until clicked: they carry details worth copying.
+      if (type !== 'err') setTimeout(bye, 3000);
     }
 
     function escText(s) {
