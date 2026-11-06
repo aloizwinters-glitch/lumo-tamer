@@ -99,6 +99,21 @@ function renderConfigPage(isAuthenticated: boolean): string {
       border-bottom: 1px solid var(--line);
     }
     .toolbar-actions { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: flex-end; }
+    .toolbar-actions button {
+      padding: 0.42rem 0.85rem; font-size: 0.78rem; font-weight: 600;
+      white-space: nowrap;
+    }
+    .search-wrap { position: relative; }
+    .search-clear {
+      position: absolute; right: 0.4rem; top: 50%; transform: translateY(-50%);
+      display: none; align-items: center; justify-content: center;
+      width: 1.35rem; height: 1.35rem; padding: 0; border-radius: 50%;
+      background: var(--purple-soft); color: var(--purple); font-size: 0.85rem;
+      box-shadow: none;
+    }
+    .search-clear:hover { background: var(--purple); color: #fff; }
+    .search-wrap.has-text .search-clear { display: inline-flex; }
+    .search-wrap.has-text input { padding-right: 2.1rem; }
     .toolbar .hint { margin: 0; }
 
     .row.bool input[type=checkbox] {
@@ -260,7 +275,10 @@ function renderConfigPage(isAuthenticated: boolean): string {
     <div>
       <div class="card">
         <div class="toolbar">
-          <input id="filter" type="text" placeholder="Search settings">
+          <div class="search-wrap" id="searchWrap">
+            <input id="filter" type="text" placeholder="Search settings">
+            <button type="button" id="searchClear" class="search-clear" aria-label="Clear search">×</button>
+          </div>
           <span id="status" class="hint">Loading…</span>
           <div class="toolbar-actions">
             <button id="exportBtn" type="button" class="secondary">Export</button>
@@ -306,6 +324,8 @@ function renderConfigPage(isAuthenticated: boolean): string {
       saveRestartBtn.disabled = !hasChanges;
     }
     const filterEl = document.getElementById('filter');
+    const searchWrap = document.getElementById('searchWrap');
+    const searchClearBtn = document.getElementById('searchClear');
     const dirty = new Map();
     const resets = new Set();
     let fields = [];
@@ -778,7 +798,17 @@ function renderConfigPage(isAuthenticated: boolean): string {
       throw new Error('Server did not come back. Docker should restart it; if you started it by hand, start it again, then press F5.');
     }
 
-    filterEl.addEventListener('input', render);
+    filterEl.addEventListener('input', () => {
+      searchWrap.classList.toggle('has-text', filterEl.value !== '');
+      render();
+    });
+    searchClearBtn.addEventListener('click', () => {
+      if (filterEl.value === '') return;
+      filterEl.value = '';
+      searchWrap.classList.remove('has-text');
+      render();
+      filterEl.focus();
+    });
 
     async function putConfig(payload) {
       saveRestartBtn.disabled = true;
