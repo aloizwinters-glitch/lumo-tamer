@@ -1,3 +1,24 @@
+## [0.7.0-dev.10](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.9...v0.7.0-dev.10) (2026-11-06)
+
+### Features
+
+* feat(web-ui): global auth status chip and vertical sidebar on narrow screens
+
+  The signed-in state was only visible on /config via the banner; the
+  header now carries an auth chip on every page, polled from /health,
+  with a toast on the signed-in transition. Narrow windows kept the
+  sidebar vertical instead of wrapping it into a horizontal bar: below
+  840px it shrinks to 8.5-11rem, below 620px the layout collapses to a
+  single column.
+
+### Bug Fixes
+
+* fix(web-ui): exclude auth chip from the auth page
+
+  The auth page asserts the signed-in state is not present, and the
+  chip script text broke that contract while adding nothing on the
+  page whose whole purpose is the sign-in state.
+
 ## [0.7.0-dev.9](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.8...v0.7.0-dev.9) (2026-11-06)
 
 ### Bug Fixes
