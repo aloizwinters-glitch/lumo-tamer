@@ -1,3 +1,18 @@
+## [0.7.0-dev.6](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.5...v0.7.0-dev.6) (2026-11-06)
+
+### Features
+
+* feat(config): env overrides for port and vault key, config.yaml hot-reload
+
+  LUMO_TAMER_PORT and LUMO_VAULT_KEY_FILE override server.port and
+  auth.vault.keyFilePath, so one config.yaml can serve several instances.
+  Disk changes (editor, another instance via symlink) hot-reload; invalid
+  content keeps the running config.
+
+### Bug Fixes
+
+* fix(config): write config.yaml without line folding
+
 ## [0.7.0-dev.5](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.4...v0.7.0-dev.5) (2026-11-05)
 
 ### Features
