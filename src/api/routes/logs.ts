@@ -59,7 +59,7 @@ export function createLogsRouter() {
   router.get('/logs', (_req, res) => {
     const extraCss = `
       .log-pane {
-        display: grid; grid-template-rows: auto 1fr; gap: 0.75rem;
+        display: grid; grid-template-rows: auto minmax(0, 1fr); gap: 0.75rem;
         height: calc(100vh - 12rem);
       }
       .log-toolbar {
@@ -76,7 +76,7 @@ export function createLogsRouter() {
       }
       .log-feed {
         background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
-        box-shadow: var(--shadow); overflow-y: auto; padding: 0.7rem;
+        box-shadow: var(--shadow); overflow-y: auto; padding: 0.7rem; min-height: 0;
         font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem;
       }
       .log-entry {
