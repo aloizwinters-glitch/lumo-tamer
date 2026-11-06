@@ -246,7 +246,7 @@ a.icon-btn.current { background: var(--purple-soft); color: var(--purple); }
 .lede { margin: 0 0 1rem; color: var(--muted); font-size: 0.92rem; }
 .nav { display: flex; gap: 1rem; flex-wrap: wrap; font-size: 0.85rem; margin: 0 0 1rem; }
 label { display: block; margin: 0.85rem 0 0.3rem; font-size: 0.82rem; font-weight: 600; }
-input[type=text], input[type=email], input[type=number], input[type=password], textarea, select {
+input[type=text], input[type=email], input[type=number], input[type=password], input[type=search], textarea, select {
   width: 100%; padding: 0.7rem 0.8rem; border-radius: 10px; border: 1px solid var(--line);
   background: var(--input); color: inherit; font: inherit;
 }

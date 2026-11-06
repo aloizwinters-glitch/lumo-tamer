@@ -104,6 +104,8 @@ function renderConfigPage(isAuthenticated: boolean): string {
       white-space: nowrap;
     }
     .search-wrap { position: relative; }
+    .search-wrap input[type=search]::-webkit-search-cancel-button,
+    .search-wrap input[type=search]::-webkit-search-decoration { -webkit-appearance: none; appearance: none; }
     .search-clear {
       position: absolute; right: 0.4rem; top: 50%; transform: translateY(-50%);
       display: none; align-items: center; justify-content: center;
@@ -276,7 +278,7 @@ function renderConfigPage(isAuthenticated: boolean): string {
       <div class="card">
         <div class="toolbar">
           <div class="search-wrap" id="searchWrap">
-            <input id="filter" type="text" placeholder="Search settings">
+            <input id="filter" type="search" autocomplete="off" placeholder="Search settings">
             <button type="button" id="searchClear" class="search-clear" aria-label="Clear search">×</button>
           </div>
           <span id="status" class="hint">Loading…</span>
