@@ -1,3 +1,14 @@
+## [0.7.0-dev.7](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.6...v0.7.0-dev.7) (2026-11-06)
+
+### Bug Fixes
+
+* fix(server): release listen port before respawn on restart
+
+  respawnSelf spawned the child while the parent still held the port, so
+  the child lost the bind race and died parentless; nothing restarted it.
+  Close the http server (plus closeAllConnections and a 2s failsafe) and
+  respawn only after the port is free.
+
 ## [0.7.0-dev.6](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.5...v0.7.0-dev.6) (2026-11-06)
 
 ### Features
