@@ -1,3 +1,65 @@
+## [0.7.0-dev.14](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.13...v0.7.0-dev.14) (2026-11-06)
+
+### Features
+
+* feat(models): rebaseline token estimation so factor 1.0 is the tuned value
+
+  The auto calibration was 1.45 (naive 4 bytes/token scaled up), and
+  practical tuning had settled on factor 0.3 — meaning every user had
+  to know a magic number. Fold the 0.3 into the calibration instead:
+  AUTO_CALIBRATION is now 1.45 * 0.3 = 0.435, so factor 1.0 produces
+  exactly the estimates the previously recommended 0.3 gave.
+
+  Existing configs: anyone at factor 0.3 should set 1.0 (identical
+  results); other factors scale accordingly (old 0.27 ~ new 0.9).
+  Docs, config editor copy, and defaults comments updated to name the
+  old-scale equivalent; tests now pin the 0.435 divisor.
+* feat(updates): prune old update images after a successful recreate
+
+  Every applied release pulled a fresh image and left the previous one
+  on the host. Frequent dev releases therefore accumulate hundreds of MB
+  per tag until the next pull fails with "no space left on device".
+
+  After recreating the tamer container, the updater helper now deletes
+  leftover images of the same repository that no container references:
+  the just-deployed ref is kept, images still in use (running or stopped
+  containers) are never removed, dangling layers go away. Failures are
+  logged and non-fatal — pruning must never break the update flow.
+* feat(web-ui): full toast messages, click to copy, errors linger
+
+  Error toasts carried details (save/import/update failures with
+  server messages) but capped at 22rem, clipped long text, and
+  vanished after 3-6s — useless for copy/paste into an issue.
+
+  - max-width 34rem, overflow-wrap anywhere: full text, always readable
+  - every toast is clickable: copies its message to the clipboard and closes
+  - error toasts stay until clicked instead of auto-dismissing;
+    ok/muted toasts keep their timer
+  - applied to all three toast systems (global shell, update chip,
+    auth chip) and the /config page copy
+
+### Bug Fixes
+
+* fix(server): rebuild stale code on respawn before serving it
+
+  Deploy styles that sync source without rebuilding (rsync to a running
+  checkout) leave dist/ older than src/. The web restart button spawns
+  node dist directly, so it happily restarted the previous build forever
+  — new code only appeared after a manual start script ran its guard.
+
+  - new staleness.ts: isInstallStale / isBuildStale mtime checks
+  - respawnSelf: when running from dist and stale, chain npm install &&
+    npm run build && exec through sh; falls back to a direct spawn if the
+    chain fails. tsx dev runs respawn as before.
+
+  Tests: 554 passed.
+* fix(web-ui): render the settings search as type=search
+
+  Password managers mistook the settings filter field for a login field
+  (type=text on a page with an auth form). type=search plus
+  autocomplete=off marks it clearly as a plain search box; the
+  native webkit cancel button is hidden in favor of our custom x.
+
 ## [0.7.0-dev.13](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.12...v0.7.0-dev.13) (2026-11-06)
 
 ### Bug Fixes
