@@ -1,3 +1,53 @@
+## [0.7.0-dev.12](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.11...v0.7.0-dev.12) (2026-11-06)
+
+### Bug Fixes
+
+* fix(vault): follow symlinks on the atomic vault write
+
+  Slot-pool setups symlink sessions/vault.enc to a shared master copy.
+  writeVault wrote via writeFileSync(tmp) + renameSync(tmp, path), and
+  rename replaces a symlink with a real file: after the first login the
+  vault lived inside the slot, the master stayed stale, and the next
+  start parked the real file as .pre-shared.bak and relinked to the
+  stale master — losing the session on every restart.
+
+  writeVault now resolves the path with realpathSync first, so the
+  atomic write always lands on the link target. Vault sharing with
+  parallel slots stays correct: one login, last-write-wins refreshes.
+
+  Tests: 554 passed (2 new symlink regressions).
+
+### Documentation
+
+* docs: full audit sweep against current code
+
+  All docs audited against the code (two explore agents) after 67 commits
+  of drift since the ZeroTricks merge-base. Highlights:
+
+  custom-tools.md: rewritten — routing.nativeTools, recovery.* bounces, and
+  instruction modules were missing; removed image tools still listed;
+  replacePatterns and quoted template snippets showed pre-routing text.
+
+  config.md: sub-category editor, Clear button for empty-default secrets,
+  config export/import dialogs and the two new API routes.
+
+  opencode.md: apertus-15 and -thinking variants in the example config,
+  model-card metadata, reasoning_effort aliases.
+
+  updates.md: optional updates.githubToken (PAT) with secret semantics;
+  Shift+click force update, POST /v1/update?force=1, the 429 attempt gate.
+
+  README.md: /logs + /v1/logs + export/import in the endpoint table,
+  web-UI feature bullets, complete reasoning_effort list, autoVariants
+  and extraModels pinned, /update command.
+
+  development.md: regenerated src/ layout (config-editor, config-transfer,
+  log-broadcast, docker-update, tools/), npm run build:login, engines note.
+
+  authentication.md: Proton desktop sign-in fork flow (dual endpoint,
+  10-min TTL, Drive-scoped tokens, local key regen), deliberately-skipped
+  revoke on dead refresh tokens, symlink-safe vault writes.
+
 ## [0.7.0-dev.11](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.10...v0.7.0-dev.11) (2026-11-06)
 
 ### Features
