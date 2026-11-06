@@ -38,8 +38,10 @@ export const CDP = {
 export const TOKEN_ESTIMATE = {
   /** Naive ASCII-ish guess. */
   NAIVE_BYTES_PER_TOKEN: 4,
-  /** Auto vs naive. Factor 1.0 in Settings means this. 0.9 = 90% of auto. */
-  AUTO_CALIBRATION: 1.45,
+  /** Calibrated auto vs naive, measured against Lumo/compaction behavior.
+   * Factor 1.0 in Settings means this (old calibration was 1.45; the
+   * re-baseline folds the 0.3 the user ran into it: 1.45 x 0.3 = 0.435). */
+  AUTO_CALIBRATION: 0.435,
 } as const;
 
 export const AUTH = {

@@ -1,9 +1,9 @@
 /**
  * Proton does not report prompt_tokens. Estimate from UTF-8 byte length.
  *
- * auto: TOKEN_ESTIMATE in const.ts (4 bytes/token × 1.45).
+ * auto: TOKEN_ESTIMATE in const.ts (4 bytes/token ÷ 0.435).
  * Factor 1.0 = that baseline. 0.9 = 90% of auto, not 90% of naive /4.
- * number: raw chars-per-token divisor, no 1.45 baked in.
+ * number: raw chars-per-token divisor, no calibration baked in.
  * off: 0.
  */
 

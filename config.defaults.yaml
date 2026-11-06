@@ -237,11 +237,12 @@ server:
 
   # Prompt token estimation mode for OpenCode compaction.
   # Proton doesn't report input tokens, so we estimate them to trigger compaction correctly.
-  #   "auto" - UTF-8 bytes / (4/1.45). Factor 1.0 = that baseline.
+  #   "auto" - UTF-8 bytes / (4/0.435). Factor 1.0 = that baseline
+  #   (equals the old recommended factor 0.3 on the former x1.45 scale).
   #   "off"  - prompt_tokens = 0 (compaction will not trigger)
-  #   number - raw chars-per-token divisor (no 1.45 baked in)
+  #   number - raw chars-per-token divisor (no calibration baked in)
   promptTokenEstimation: "auto"
-  # Fine-tune relative to auto (1.45). 1.0 = auto, 0.9 = 90% of auto, 1.1 = 110%.
+  # Fine-tune relative to auto (x0.435 calibration). 1.0 = auto, 0.9 = 90% of auto, 1.1 = 110%.
   promptTokenEstimationFactor: 1.0
 
 

@@ -405,13 +405,13 @@ const COPY: Record<string, FieldCopy> = {
   'server.promptTokenEstimation': {
     label: 'Token estimation (Beta)',
     hint: 'Estimates input tokens for OpenCode compaction. Proton does not report them. Experimental — may be inaccurate.',
-    more: `auto is ${TOKEN_ESTIMATE.NAIVE_BYTES_PER_TOKEN} bytes/token scaled by ${TOKEN_ESTIMATE.AUTO_CALIBRATION} (the Lumo baseline). Factor 1.0 is that value. off: prompt_tokens=0. A number is a raw chars-per-token divisor without ${TOKEN_ESTIMATE.AUTO_CALIBRATION}.`,
+    more: `auto is ${TOKEN_ESTIMATE.NAIVE_BYTES_PER_TOKEN} bytes/token scaled by ${TOKEN_ESTIMATE.AUTO_CALIBRATION} (the calibrated Lumo baseline; 1.0 here equals the previously recommended 0.3 on the old scale). Factor 1.0 is that value. off: prompt_tokens=0. A number is a raw chars-per-token divisor without ${TOKEN_ESTIMATE.AUTO_CALIBRATION}.`,
     choices: ['auto', 'off'],
   },
   'server.promptTokenEstimationFactor': {
     label: 'Token estimation factor (Beta)',
-    hint: 'Multiplier on the auto estimate. 1.0 = unchanged, below 1 counts fewer tokens, above 1 counts more.',
-    more: 'Only used when Token estimation is auto. 0.9 = 90% of the estimate (compaction later). 1.1 = 110% (compaction sooner).',
+    hint: 'Multiplier on the auto estimate. 1.0 = the calibrated default, below 1 counts fewer tokens, above 1 counts more.',
+    more: 'Only used when Token estimation is auto. 0.9 = 90% of the estimate (compaction later). 1.1 = 110% (compaction sooner). 1.0 matches the compaction timing previously achieved with 0.3 on the old (x1.45) scale.',
   },
   'server.customTools.prefix': {
     label: 'Custom tool prefix',
