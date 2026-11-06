@@ -122,6 +122,8 @@ export function updateConfigYaml(updater: (doc: Document) => void): void {
   }
 
   updater(doc);
-  writeFileSync(status.path, doc.toString());
+  // lineWidth: 0 — the default folds long values onto continuation lines,
+  // which breaks sed-based patching and human edits.
+  writeFileSync(status.path, doc.toString({ lineWidth: 0 }));
 }
 
