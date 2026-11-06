@@ -4,6 +4,8 @@
  * GET  /config      - Form (no API key; does not embed secrets)
  * GET  /v1/config   - Field tree; server.apiKey is never returned
  * PUT  /v1/config   - Apply path edits and hot-reload in-memory config
+ * GET  /v1/config/export  - Portable JSON snapshot of overrides (?secrets=true opt-in)
+ * POST /v1/config/import  - Merge snapshot into config.yaml (dryRun:true = report only)
  */
 
 import { Router, Request, Response } from 'express';
@@ -22,6 +24,12 @@ import {
 } from '../../app/config-editor.js';
 import { logger } from '../../app/logger.js';
 import { resetUpdateCache, startUpdateChecker } from '../../app/updates.js';
+import {
+  buildConfigSnapshot,
+  parseConfigSnapshot,
+  planConfigImport,
+} from '../../app/config-transfer.js';
+import { SECRET_PATHS } from '../../app/config-editor-copy.js';
 import { htmlPage } from '../web-ui.js';
 import { VERSION } from '../../app/version.js';
 import { clientIp, createAttemptGate } from '../attempt-limit.js';
@@ -39,6 +47,24 @@ function renderConfigPage(isAuthenticated: boolean): string {
     .row.hidden-field {
       display: none !important;
     }
+    .io-dialog {
+      border: 1px solid var(--line); border-radius: 10px; padding: 1.1rem 1.25rem;
+      width: min(92vw, 46rem); max-height: 86vh;
+    }
+    .io-dialog::backdrop { background: rgba(0, 0, 0, 0.45); }
+    .io-dialog h3 { margin: 0 0 0.25rem; }
+    .io-dialog textarea {
+      width: 100%; resize: vertical; font-family: monospace; font-size: 0.75rem;
+      white-space: pre; overflow-wrap: normal;
+    }
+    .io-report {
+      margin: 0.6rem 0 0; padding: 0.6rem 0.75rem; border-radius: 6px; font-size: 0.78rem;
+      white-space: pre-wrap; overflow: auto; max-height: 12rem;
+    }
+    .io-report.ok { background: var(--ok-soft); color: var(--ok); }
+    .io-report.err { background: #fee; color: #b00; }
+    .io-label { display: flex; align-items: center; gap: 0.4rem; margin: 0.6rem 0 0; font-size: 0.78rem; }
+    .dialog-actions { display: flex; justify-content: flex-end; gap: 0.5rem; margin-top: 0.9rem; }
     .layout {
       display: grid; grid-template-columns: 16rem minmax(0, 1fr); gap: 1rem; align-items: start;
       min-height: calc(100vh - 8rem);
@@ -237,6 +263,8 @@ function renderConfigPage(isAuthenticated: boolean): string {
           <input id="filter" type="text" placeholder="Search settings">
           <span id="status" class="hint">Loading…</span>
           <div class="toolbar-actions">
+            <button id="exportBtn" type="button" class="secondary">Export</button>
+            <button id="importBtn" type="button" class="secondary">Import</button>
             <button id="resetAll" type="button" class="secondary" disabled>Reset to defaults</button>
             <button id="saveRestart" type="button">Save</button>
             <button id="restartBtn" type="button" class="secondary">Restart</button>
@@ -247,6 +275,19 @@ function renderConfigPage(isAuthenticated: boolean): string {
       </div>
     </div>
   </div>
+  <dialog id="ioDialog" class="io-dialog">
+    <h3 id="ioTitle"></h3>
+    <p id="ioHint" class="hint"></p>
+    <textarea id="ioText" rows="13" spellcheck="false"></textarea>
+    <label id="ioSecretsLbl" class="io-label"><input type="checkbox" id="ioSecrets"> Include secrets (API key, GitHub token) in plaintext</label>
+    <pre id="ioReport" class="io-report" hidden></pre>
+    <div class="dialog-actions">
+      <button type="button" id="ioCopy" class="secondary" hidden>Copy</button>
+      <button type="button" id="ioValidate" class="secondary" hidden>Validate</button>
+      <button type="button" id="ioApply" hidden>Apply</button>
+      <button type="button" id="ioClose" class="secondary">Close</button>
+    </div>
+  </dialog>
   <script>
     const CATEGORIES = ${JSON.stringify(CONFIG_CATEGORIES)};
     const DEPS = ${JSON.stringify(FIELD_DEPENDENCIES)};
@@ -257,6 +298,8 @@ function renderConfigPage(isAuthenticated: boolean): string {
     const saveRestartBtn = document.getElementById('saveRestart');
     const restartBtn = document.getElementById('restartBtn');
     const resetAllBtn = document.getElementById('resetAll');
+    const exportBtn = document.getElementById('exportBtn');
+    const importBtn = document.getElementById('importBtn');
 
     function updateButtons() {
       const hasChanges = dirty.size > 0 || resets.size > 0;
@@ -795,6 +838,125 @@ function renderConfigPage(isAuthenticated: boolean): string {
       putConfig({ changes: Object.fromEntries(dirty), resets: [...resets] });
     });
 
+    // --- Export / Import -----------------------------------------------------
+    const ioDialog = document.getElementById('ioDialog');
+    const ioTitle = document.getElementById('ioTitle');
+    const ioHint = document.getElementById('ioHint');
+    const ioTextEl = document.getElementById('ioText');
+    const ioSecretsLbl = document.getElementById('ioSecretsLbl');
+    const ioSecretsEl = document.getElementById('ioSecrets');
+    const ioReport = document.getElementById('ioReport');
+    const ioCopyBtn = document.getElementById('ioCopy');
+    const ioValidateBtn = document.getElementById('ioValidate');
+    const ioApplyBtn = document.getElementById('ioApply');
+    const ioCloseBtn = document.getElementById('ioClose');
+    let ioMode = 'export';
+
+    function ioShowReport(text, type) {
+      ioReport.textContent = text;
+      ioReport.className = 'io-report ' + type;
+      ioReport.hidden = false;
+    }
+
+    function openIo(mode) {
+      ioMode = mode;
+      const isExport = mode === 'export';
+      ioTitle.textContent = isExport ? 'Export config' : 'Import config';
+      ioHint.textContent = isExport
+        ? 'Snapshot of every setting that differs from the defaults. Copy it somewhere safe, or paste it into another instance. '
+          + 'With secrets unchecked, tokens stay private but must be re-entered on the target.'
+        : 'Paste an exported snapshot, then Validate to preview what would change. Apply merges it into your config '
+          + '(existing local values are kept unless the snapshot sets them).';
+      ioSecretsLbl.style.display = isExport ? '' : 'none';
+      ioCopyBtn.hidden = !isExport;
+      ioValidateBtn.hidden = isExport;
+      ioApplyBtn.hidden = isExport;
+      ioTextEl.value = '';
+      ioReport.hidden = true;
+      ioReport.textContent = '';
+      ioDialog.showModal();
+    }
+
+    exportBtn.addEventListener('click', async () => {
+      openIo('export');
+      try {
+        const res = await fetch('/v1/config/export?secrets=' + (ioSecretsEl.checked ? 'true' : 'false'));
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Export failed');
+        ioTextEl.value = JSON.stringify(data, null, 2);
+      } catch (err) {
+        ioShowReport(err.message || 'Export failed', 'err');
+      }
+    });
+
+    importBtn.addEventListener('click', () => openIo('import'));
+
+    ioSecretsEl.addEventListener('change', async () => {
+      if (ioMode !== 'export') return;
+      try {
+        const res = await fetch('/v1/config/export?secrets=' + (ioSecretsEl.checked ? 'true' : 'false'));
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Export failed');
+        ioTextEl.value = JSON.stringify(data, null, 2);
+      } catch (err) {
+        ioShowReport(err.message || 'Export failed', 'err');
+      }
+    });
+
+    ioCopyBtn.addEventListener('click', async () => {
+      try {
+        await navigator.clipboard.writeText(ioTextEl.value);
+        showToast('Copied to clipboard.', 'ok');
+      } catch (_) {
+        ioTextEl.select();
+        document.execCommand('copy');
+      }
+    });
+
+    async function doImport(dryRun) {
+      try {
+        const res = await fetch('/v1/config/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ dryRun, snapshot: ioTextEl.value }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          ioShowReport(data.error || 'Import failed', 'err');
+          return;
+        }
+        const r = data.report;
+        const lines = [];
+        if (r.overwrites.length) {
+          lines.push('Changes:');
+          for (const o of r.overwrites) {
+            const fmt = (v) => v === undefined ? '(default)' : JSON.stringify(v);
+            lines.push('  ' + o.path + ': ' + fmt(o.from) + ' \u2192 ' + fmt(o.to));
+          }
+        }
+        if (r.migrated.length) lines.push('Renamed: ' + r.migrated.map((m) => m.from + ' \u2192 ' + m.to).join(', '));
+        if (r.dropped.length) lines.push('Ignored (not in this version): ' + r.dropped.join(', '));
+        if (r.warnings.length) lines.push('Warnings:\n  ' + r.warnings.join('\n  '));
+        const noop = r.unchanged.length ? ', ' + r.unchanged.length + ' already up to date' : '';
+        lines.push('');
+        lines.push(r.overwrites.length + ' setting(s) to change' + noop + (dryRun ? '. Press Apply.' : ' imported.'));
+        ioShowReport(lines.join('\n'), 'ok');
+        if (!dryRun) {
+          dirty.clear();
+          resets.clear();
+          updateButtons();
+          showToast('Config imported and reloaded.', 'ok');
+          await load();
+        }
+      } catch (err) {
+        ioShowReport(err.message || 'Import failed', 'err');
+      }
+    }
+
+    ioValidateBtn.addEventListener('click', () => doImport(true));
+    ioApplyBtn.addEventListener('click', () => doImport(false));
+    ioCloseBtn.addEventListener('click', () => ioDialog.close());
+
     load().catch((err) => {
       statusEl.className = 'err';
       statusEl.textContent = err.message || 'Load failed';
@@ -840,6 +1002,75 @@ export function createConfigRouter(app: Application, hooks: ConfigRouterHooks = 
       fields,
       current: redactSecrets(user),
     });
+  });
+
+  router.get('/v1/config/export', (req: Request, res: Response) => {
+    const status = checkConfigFile();
+    if (status.error) {
+      res.status(500).json({ error: status.error });
+      return;
+    }
+    const includeSecrets = req.query.secrets === 'true';
+    const defaults = loadDefaultsYaml();
+    const user = loadConfigYaml();
+    const snapshot = buildConfigSnapshot(defaults, user, VERSION, includeSecrets, SECRET_PATHS);
+    logger.info(
+      { overrides: Object.keys(snapshot.changes).length, includeSecrets },
+      'Config exported',
+    );
+    res.json(snapshot);
+  });
+
+  router.post('/v1/config/import', (req: Request, res: Response) => {
+    if (!allowSave(clientIp(req))) {
+      res.status(429).json({ error: 'Too many config saves. Wait a few minutes.' });
+      return;
+    }
+    const status = checkConfigFile();
+    if (status.error) {
+      res.status(500).json({ error: status.error });
+      return;
+    }
+    const body = req.body ?? {};
+    const raw = typeof body.snapshot === 'string'
+      ? body.snapshot
+      : JSON.stringify(body.snapshot ?? null);
+    try {
+      const snapshot = parseConfigSnapshot(raw);
+      const defaults = loadDefaultsYaml();
+      const user = loadConfigYaml();
+      const { edits, report } = planConfigImport(snapshot, defaults, VERSION, user, SECRET_PATHS);
+      if (body.dryRun === true) {
+        res.json({ dryRun: true, report });
+        return;
+      }
+      const next = applyConfigEdits(loadConfigYaml(), defaults, edits);
+      parseServerUserConfig(next);
+      updateConfigYaml((doc) => {
+        applyEditsToDocument(doc, defaults, edits);
+      });
+      try {
+        reloadConfig();
+        resetUpdateCache();
+        if (getConfigMode() === 'server') startUpdateChecker();
+      } catch (error) {
+        logger.warn({ error }, 'Saved YAML but could not hot-reload in-memory config');
+      }
+      logger.info(
+        { imported: report.imported.length, migrated: report.migrated.length, dropped: report.dropped.length },
+        'Config imported via /config',
+      );
+      res.json({ success: true, message: 'Imported.', report });
+    } catch (error) {
+      if (error instanceof ZodError) {
+        const details = error.issues.map((e) => `${e.path.join('.')}: ${e.message}`).join('; ');
+        res.status(400).json({ error: `Invalid config: ${details}` });
+        return;
+      }
+      const message = error instanceof Error ? error.message : 'Import failed';
+      logger.error({ error }, "Can't import config via /config");
+      res.status(400).json({ error: message });
+    }
   });
 
   router.put('/v1/config', (req: Request, res: Response) => {
