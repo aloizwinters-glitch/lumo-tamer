@@ -936,11 +936,11 @@ function renderConfigPage(isAuthenticated: boolean): string {
         }
         if (r.migrated.length) lines.push('Renamed: ' + r.migrated.map((m) => m.from + ' \u2192 ' + m.to).join(', '));
         if (r.dropped.length) lines.push('Ignored (not in this version): ' + r.dropped.join(', '));
-        if (r.warnings.length) lines.push('Warnings:\n  ' + r.warnings.join('\n  '));
+        if (r.warnings.length) lines.push('Warnings:\\n  ' + r.warnings.join('\\n  '));
         const noop = r.unchanged.length ? ', ' + r.unchanged.length + ' already up to date' : '';
         lines.push('');
         lines.push(r.overwrites.length + ' setting(s) to change' + noop + (dryRun ? '. Press Apply.' : ' imported.'));
-        ioShowReport(lines.join('\n'), 'ok');
+        ioShowReport(lines.join('\\n'), 'ok');
         if (!dryRun) {
           dirty.clear();
           resets.clear();

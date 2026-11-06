@@ -7,7 +7,7 @@ import {
 } from '../../src/app/config-transfer.js';
 
 const DEFAULTS = {
-  server: { enableWebSearch: false, apiKey: 'placeholder', port: 3020, tags: [] },
+  server: { enableWebSearch: false, apiKey: 'placeholder', port: 3003, tags: [] },
   updates: { githubToken: '' },
 };
 
@@ -27,7 +27,7 @@ describe('compareVersions', () => {
 describe('buildConfigSnapshot', () => {
   it('captures overrides only, secrets behind opt-in', () => {
     const user = {
-      server: { enableWebSearch: true, apiKey: 'sk-real', port: 3020 },
+      server: { enableWebSearch: true, apiKey: 'sk-real', port: 3003 },
       updates: { githubToken: 'ghp_abc' },
     };
     const without = buildConfigSnapshot(DEFAULTS, user, '1.0.0', false, SECRETS);
@@ -76,7 +76,7 @@ describe('planConfigImport', () => {
         'server.goneForever': 1,
       },
     }));
-    const user = { server: { enableWebSearch: true, port: 3020 } };
+    const user = { server: { enableWebSearch: true, port: 3003 } };
     const { edits, report } = planConfigImport(snap, DEFAULTS, '0.7.0', user, SECRETS);
     expect(edits.changes['server.enableWebSearch']).toBe(true);
     expect(report.imported).toContain('server.enableWebSearch');
@@ -94,11 +94,11 @@ describe('planConfigImport', () => {
         'server.port': 3030,               // differs locally -> overwrite
       },
     }));
-    const user = { server: { enableWebSearch: true, port: 3020 } };
+    const user = { server: { enableWebSearch: true, port: 3003 } };
     const { report } = planConfigImport(snap, DEFAULTS, '0.7.0', user, SECRETS);
     expect(report.unchanged).toEqual(['server.enableWebSearch']);
     expect(report.overwrites).toEqual([
-      { path: 'server.port', from: 3020, to: 3030 },
+      { path: 'server.port', from: 3003, to: 3030 },
     ]);
   });
 
