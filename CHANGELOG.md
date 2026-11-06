@@ -1,3 +1,18 @@
+## [0.7.0-dev.13](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.12...v0.7.0-dev.13) (2026-11-06)
+
+### Bug Fixes
+
+* fix(web-ui): compact toolbar buttons and a clear (x) button for search
+
+  The /config toolbar buttons inherited the global button padding
+  (0.7rem 1.1rem) and font size, so five of them wrapped into two
+  rows and visually dominated the search field. Toolbar action buttons
+  now carry their own compact sizing (0.42rem/0.85rem, 0.78rem font)
+  and nowrap, so they stay on one row.
+
+  The search field gained an x button that appears only while text
+  is present: clears the filter, re-renders, and refocuses the field.
+
 ## [0.7.0-dev.12](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.11...v0.7.0-dev.12) (2026-11-06)
 
 ### Bug Fixes
