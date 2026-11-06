@@ -341,7 +341,7 @@ export function htmlPage(options: {
       </a>
       <div class="brand-actions">
         <button type="button" class="update-chip" id="updateChip">Updates</button>
-        <button type="button" class="auth-chip" id="authChip" hidden>…</button>
+        ${options.page === 'auth' ? '' : '<button type="button" class="auth-chip" id="authChip" hidden>…</button>'}
         ${iconBtn(REPO_URL, 'GitHub', ICON_GITHUB, ' target="_blank" rel="noopener noreferrer"')}
         <button type="button" class="theme-btn" id="themeToggle" aria-label="Toggle theme"></button>
         <button type="button" class="icon-btn" id="uiRestartBtn" aria-label="Restart server" title="Restart server">${ICON_RESTART}</button>
@@ -353,7 +353,7 @@ export function htmlPage(options: {
     </div>
   </div>
   <div id="toast-container" aria-live="polite"></div>
-  <script>${THEME_BIND}${UPDATE_BIND}${AUTH_STATUS_BIND}${LOGOUT_BIND}${RESTART_BIND}</script>
+  <script>${THEME_BIND}${UPDATE_BIND}${options.page === 'auth' ? '' : AUTH_STATUS_BIND}${LOGOUT_BIND}${RESTART_BIND}</script>
 </body>
 </html>`;
 }
