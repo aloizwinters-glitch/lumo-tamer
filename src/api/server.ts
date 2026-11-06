@@ -5,7 +5,8 @@ import express from 'express';
 import { parseDocument } from 'yaml';
 import { getServerConfig, getMetricsConfig, authConfig, reloadConfig, parseServerUserConfig } from '../app/config.js';
 import { isContainerEnv } from '../app/env.js';
-import { resolveDataPath } from '../app/paths.js';
+import { resolveDataPath, PROJECT_ROOT } from '../app/paths.js';
+import { isInstallStale, isBuildStale } from '../app/staleness.js';
 import { getConfigPath } from '../app/config-file.js';
 import { logger } from '../app/logger.js';
 import { setupAuthMiddleware, setupLoggingMiddleware, setupMetricsMiddleware, setupReadyMiddleware } from './middleware.js';
@@ -214,10 +215,48 @@ function respawnSelf(): void {
     ...process.execArgv,
     ...process.argv.slice(1).filter((arg) => arg !== 'watch'),
   ];
-  const child = spawn(process.execPath, args, {
-    detached: true,
-    stdio: 'inherit',
-    env: process.env,
-  });
-  child.unref();
+  const spawnDirect = (): void => {
+    const child = spawn(process.execPath, args, {
+      detached: true,
+      stdio: 'inherit',
+      env: process.env,
+    });
+    child.unref();
+  };
+
+  // tsx dev runs from src/ — nothing to rebuild, respawn as-is.
+  const runFromDist = /(?:^|[\\/])dist[\\/]/.test(process.argv[1] ?? '');
+  if (!runFromDist) {
+    spawnDirect();
+    return;
+  }
+
+  // rsync-style deploys sync src/ but not dist/. Without this chain the
+  // restart button would happily restart the previous build forever.
+  const pre: string[] = [];
+  if (isInstallStale(PROJECT_ROOT)) pre.push('npm install --no-audit --no-fund');
+  if (isBuildStale(PROJECT_ROOT)) pre.push('npm run build');
+  if (pre.length === 0) {
+    spawnDirect();
+    return;
+  }
+
+  logger.info({ steps: pre }, 'Source changed since the last build — rebuilding before respawn');
+  const command = [...pre, `exec ${[process.execPath, ...args].map(shellQuote).join(' ')}`].join(' && ');
+  try {
+    const child = spawn('/bin/sh', ['-c', command], {
+      detached: true,
+      stdio: 'inherit',
+      cwd: PROJECT_ROOT,
+      env: process.env,
+    });
+    child.unref();
+  } catch (err) {
+    logger.warn({ err }, 'Chained respawn failed — starting without rebuild');
+    spawnDirect();
+  }
+}
+
+function shellQuote(arg: string): string {
+  return /^[\w./-]+$/.test(arg) ? arg : `'${arg.replace(/'/g, `'\\''`)}'`;
 }
