@@ -185,13 +185,12 @@ function renderConfigPage(isAuthenticated: boolean): string {
       background: var(--input);
     }
     @media (max-width: 840px) {
-      .layout { grid-template-columns: 1fr; }
-      .side {
-        position: sticky; top: 0; z-index: 3; flex-direction: row; overflow-x: auto;
-        gap: 0.3rem; padding: 0.4rem;
-      }
-      .side .nav-item { width: auto; white-space: nowrap; }
+      .layout { grid-template-columns: minmax(8.5rem, 11rem) minmax(0, 1fr); gap: 0.6rem; }
       .toolbar { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 620px) {
+      .layout { grid-template-columns: 1fr; }
+      .side { position: static; max-height: none; }
     }
   `;
   const body = `

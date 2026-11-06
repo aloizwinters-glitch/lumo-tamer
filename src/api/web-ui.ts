@@ -17,6 +17,8 @@ const LOGOUT_BIND = `(function(){var btn=document.getElementById('logout');if(!b
 // Header restart button (both pages). Distinct id: the config pane has its own restartBtn.
 const RESTART_BIND = `(function(){var btn=document.getElementById('uiRestartBtn');if(!btn)return;btn.addEventListener('click',function(){if(btn.disabled)return;if(!confirm('Restart the server now?'))return;btn.disabled=true;btn.style.opacity='0.5';fetch('/v1/restart',{method:'POST'}).catch(function(){}).then(function(){var tries=0;(function poll(){tries++;if(tries>60){alert('Server did not come back. Docker should restart it; if you started it by hand, start it again, then press F5.');return;}setTimeout(function(){fetch('/health',{cache:'no-store'}).then(function(r){if(r.ok){location.reload();}else{poll();}}).catch(function(){poll();});},500);})();});});})();`;
 
+const AUTH_STATUS_BIND = `(function(){var chip=document.getElementById('authChip');if(!chip)return;chip.hidden=false;chip.addEventListener('click',function(){location.href='/auth';});function toast(msg,ok){var c=document.getElementById('toast-container');if(!c)return;var el=document.createElement('div');el.className='toast '+(ok?'ok':'err');el.textContent=msg;c.appendChild(el);setTimeout(function(){el.style.opacity='0';el.style.transform='translateX(100%)';setTimeout(function(){el.remove();},300);},6000);}var was=null;function poll(){fetch('/health',{cache:'no-store'}).then(function(r){return r.ok?r.json():null;}).then(function(d){var valid=!!(d&&d.auth&&d.auth.valid);chip.textContent=valid?'Signed in':'Not signed in';chip.title=valid?'Signed in to Proton':'Waiting for authentication — click to open /auth';chip.classList.toggle('ready',valid);chip.classList.toggle('err',!valid);if(was===true&&!valid)toast('Signed out — waiting for authentication',false);was=valid;}).catch(function(){chip.textContent='No server';chip.classList.add('err');chip.classList.remove('ready');});}poll();setInterval(poll,5000);})();`;
+
 const UPDATE_BIND = `(function(){
   var chip = document.getElementById('updateChip');
   if (!chip) return;
@@ -268,7 +270,7 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
 .hint, .muted { color: var(--muted); font-size: 0.85rem; line-height: 1.45; }
 .hint { margin: 1rem 0 0; }
 code { font-size: 0.84em; background: var(--purple-soft); padding: 0.05rem 0.3rem; border-radius: 6px; }
-button.update-chip {
+button.update-chip, button.auth-chip {
   display: inline-flex; align-items: center; flex: none;
   height: 2.25rem; margin: 0; padding: 0 0.75rem;
   border-radius: 999px; border: 1px solid var(--line);
@@ -276,10 +278,11 @@ button.update-chip {
   font-size: 0.75rem; font-weight: 650; letter-spacing: 0.01em;
   cursor: pointer; box-shadow: none;
 }
-button.update-chip:hover { background: var(--purple-soft); color: var(--purple); border-color: transparent; }
-button.update-chip.ready { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
-button.update-chip.ready:hover { background: var(--ok); color: #fff; }
-button.update-chip:disabled { opacity: 0.55; cursor: not-allowed; }
+button.update-chip:hover, button.auth-chip:hover { background: var(--purple-soft); color: var(--purple); border-color: transparent; }
+button.update-chip.ready, button.auth-chip.ready { background: var(--ok-soft); color: var(--ok); border-color: transparent; }
+button.update-chip.ready:hover, button.auth-chip.ready:hover { background: var(--ok); color: #fff; }
+button.auth-chip.err { background: var(--err); color: #fff; border-color: transparent; }
+button.update-chip:disabled, button.auth-chip:disabled { opacity: 0.55; cursor: not-allowed; }
 #toast-container {
   position: fixed; top: 1rem; right: 1rem; z-index: 1000;
   display: flex; flex-direction: column; gap: 0.5rem;
@@ -338,6 +341,7 @@ export function htmlPage(options: {
       </a>
       <div class="brand-actions">
         <button type="button" class="update-chip" id="updateChip">Updates</button>
+        <button type="button" class="auth-chip" id="authChip" hidden>…</button>
         ${iconBtn(REPO_URL, 'GitHub', ICON_GITHUB, ' target="_blank" rel="noopener noreferrer"')}
         <button type="button" class="theme-btn" id="themeToggle" aria-label="Toggle theme"></button>
         <button type="button" class="icon-btn" id="uiRestartBtn" aria-label="Restart server" title="Restart server">${ICON_RESTART}</button>
@@ -349,7 +353,7 @@ export function htmlPage(options: {
     </div>
   </div>
   <div id="toast-container" aria-live="polite"></div>
-  <script>${THEME_BIND}${UPDATE_BIND}${LOGOUT_BIND}${RESTART_BIND}</script>
+  <script>${THEME_BIND}${UPDATE_BIND}${AUTH_STATUS_BIND}${LOGOUT_BIND}${RESTART_BIND}</script>
 </body>
 </html>`;
 }
