@@ -261,6 +261,20 @@ function loadMergedConfig(mode: ConfigMode): MergedConfig {
     delete merged.server;
     delete merged.cli;
 
+    // Env overrides for per-instance values so one config.yaml can serve
+    // several instances.
+    const envPort = Number(process.env.LUMO_TAMER_PORT);
+    if (Number.isInteger(envPort) && envPort > 0) {
+      merged.port = envPort;
+    }
+    const envKeyFile = process.env.LUMO_VAULT_KEY_FILE;
+    if (envKeyFile) {
+      const auth = merged.auth as { vault?: { keyFilePath?: string } } | undefined;
+      if (auth && typeof auth === 'object' && auth.vault) {
+        auth.vault.keyFilePath = envKeyFile;
+      }
+    }
+
     return (mode === 'server' ? serverMergedConfigSchema : cliMergedConfigSchema).parse(merged);
   } catch (error) {
     catchZodErrors(error);

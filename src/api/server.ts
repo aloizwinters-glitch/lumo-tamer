@@ -1,9 +1,11 @@
 import { spawn } from 'child_process';
-import { readFileSync, utimesSync } from 'fs';
+import { readFileSync, utimesSync, watch } from 'fs';
 import express from 'express';
-import { getServerConfig, getMetricsConfig, authConfig } from '../app/config.js';
+import { parseDocument } from 'yaml';
+import { getServerConfig, getMetricsConfig, authConfig, reloadConfig, parseServerUserConfig } from '../app/config.js';
 import { isContainerEnv } from '../app/env.js';
 import { resolveDataPath } from '../app/paths.js';
+import { getConfigPath } from '../app/config-file.js';
 import { logger } from '../app/logger.js';
 import { setupAuthMiddleware, setupLoggingMiddleware, setupMetricsMiddleware, setupReadyMiddleware } from './middleware.js';
 import { setupApiErrorHandler } from './error-handler.js';
@@ -124,9 +126,41 @@ export class APIServer {
         }
         logger.info('========================================\n');
         startUpdateChecker();
+        watchConfigForReload();
         resolve();
       });
     });
+  }
+}
+
+/**
+ * Hot-reload config.yaml on disk changes (editor, another instance writing
+ * through a symlink). Invalid content keeps the running config; port/apiKey
+ * only apply after restart.
+ */
+function watchConfigForReload(): void {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    watch(getConfigPath(), () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        try {
+          const before = getServerConfig();
+          const doc = parseDocument(readFileSync(getConfigPath(), 'utf8'));
+          if (doc.errors.length > 0) throw new Error(doc.errors[0].message);
+          parseServerUserConfig((doc.toJS() ?? {}) as Record<string, unknown>);
+          reloadConfig();
+          const after = getServerConfig();
+          logger.info('config.yaml changed — hot-reloaded');
+          if (before.port !== after.port) logger.warn('server.port changed — needs restart');
+          if (before.apiKey !== after.apiKey) logger.warn('server.apiKey changed — needs restart');
+        } catch (err) {
+          logger.warn({ err }, 'config.yaml changed but invalid — keeping current config');
+        }
+      }, 250);
+    });
+  } catch (err) {
+    logger.debug({ err }, 'config.yaml not watchable');
   }
 }
 
