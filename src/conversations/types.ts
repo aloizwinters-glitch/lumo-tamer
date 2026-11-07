@@ -7,6 +7,7 @@
 import type { ConversationId, MessageId, SpaceId, ProjectSpace, ConversationPriv, MessagePub, ConversationPub, Role } from '@lumo/types.js';
 import { ConversationStatus } from '@lumo/types.js';
 import type { RemoteId } from '@lumo/remote/types.ts';
+import type { WireImage } from '@lumo/types-api.js';
 
 // Re-export types for consumers
 export type { ConversationId, MessageId, SpaceId, RemoteId, ProjectSpace, ConversationPriv, MessagePub, ConversationPub };
@@ -82,4 +83,5 @@ export interface MessageForStore {
     role: Role;
     content?: string;
     id?: string; // Semantic ID for deduplication (call_id for tools)
+    images?: WireImage[]; // Image input (sent to Lumo, not persisted)
 }

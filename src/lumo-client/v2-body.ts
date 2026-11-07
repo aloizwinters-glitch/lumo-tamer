@@ -6,12 +6,14 @@
  * (toChatCompletionsBody / resolveChatModel / buildLumoExtension / serializeMessages).
  *
  * Kept as a small local adapter (rather than syncing the upstream parser, which
- * also carries image/legacy/tool-delta handling outside this project's scope).
+ * also carries legacy/tool-delta handling outside this project's scope).
+ * Image input follows upstream serializeMessages/toImagePart.
  * Reuses the vendored encryption primitives unchanged; only the packaging differs
  * from the legacy generation_request path.
  */
 
 import { Role, type Turn, type ToolName, type LumoModelTier } from './types.js';
+import type { WireImage } from '@lumo/types-api.js';
 
 export type { LumoModelTier };
 
@@ -71,10 +73,77 @@ export interface LumoExtension {
     request_id?: string;
 }
 
+export interface ChatCompletionsTextPart {
+    type: 'text';
+    text: string;
+    encrypted?: true;
+}
+
+export interface ChatCompletionsImagePart {
+    type: 'image_url';
+    image_url: { url: string; encrypted?: true };
+}
+
+export type ChatCompletionsContentPart = ChatCompletionsTextPart | ChatCompletionsImagePart;
+
 export interface ChatCompletionsMessage {
     role: string;
-    content: string;
+    content: string | ChatCompletionsContentPart[];
     encrypted?: true;
+}
+
+/**
+ * Infer an image's MIME type from the magic bytes at the start of its base64
+ * payload (WireImage carries no MIME type). Mirrors upstream; falls back to png.
+ */
+function inferImageMimeType(base64: string): string {
+    if (base64.startsWith('iVBORw0KGgo')) return 'image/png';
+    if (base64.startsWith('/9j/')) return 'image/jpeg';
+    if (base64.startsWith('R0lGOD')) return 'image/gif';
+    if (base64.startsWith('UklGR')) return 'image/webp';
+    if (base64.startsWith('Qk')) return 'image/bmp';
+    return 'image/png';
+}
+
+/**
+ * WireImage -> OpenAI `image_url` part. Encrypted payloads are U2L ciphertext,
+ * so they use a generic octet-stream MIME plus a sibling `encrypted` flag
+ * (same as upstream toImagePart).
+ */
+function toImagePart(image: WireImage): ChatCompletionsImagePart {
+    const mimeType = image.encrypted ? 'application/octet-stream' : inferImageMimeType(image.data);
+    return {
+        type: 'image_url',
+        image_url: {
+            url: `data:${mimeType};base64,${image.data}`,
+            ...(image.encrypted ? { encrypted: true as const } : {}),
+        },
+    };
+}
+
+/** Serialize one turn; multimodal turns use the content-parts array form. */
+function serializeTurn(turn: Turn, encrypted: boolean): ChatCompletionsMessage {
+    const role = messageRole(turn.role);
+    const images = turn.images ?? [];
+
+    if (images.length === 0) {
+        return {
+            role,
+            content: turn.content ?? '',
+            ...(encrypted ? { encrypted: true as const } : {}),
+        };
+    }
+
+    const parts: ChatCompletionsContentPart[] = [];
+    if (turn.content) {
+        parts.push({ type: 'text', text: turn.content, ...(encrypted ? { encrypted: true as const } : {}) });
+    }
+    for (const image of images) {
+        parts.push(toImagePart(image));
+    }
+    // Upstream compat: also flag encryption at the message level for the parts form.
+    const anyEncrypted = encrypted || images.some((im) => im.encrypted);
+    return { role, content: parts, ...(anyEncrypted ? { encrypted: true as const } : {}) };
 }
 
 export interface ChatCompletionsBody {
@@ -90,14 +159,7 @@ export interface ChatCompletionsBody {
 
 /** Build the POST body for `ai/v1/chat/completions`. */
 export function buildChatCompletionsBody(params: BuildChatBodyParams): ChatCompletionsBody {
-    const messages = params.turns.map((turn) => {
-        const message: ChatCompletionsMessage = {
-            role: messageRole(turn.role),
-            content: turn.content ?? '',
-            ...(params.encrypted ? { encrypted: true as const } : {}),
-        };
-        return message;
-    });
+    const messages = params.turns.map((turn) => serializeTurn(turn, params.encrypted));
 
     const lumo: LumoExtension = { client_type: 'frontend' };
     if (params.target) {

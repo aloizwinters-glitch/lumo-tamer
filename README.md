@@ -223,7 +223,7 @@ server:
   bodyLimit: "5mb"    # inbound image_url payloads count against this
 ```
 
-Inbound: OpenAI `image_url` / `input_image` (data URLs or http(s)) are forwarded as Lumo images.  
+Inbound (vision): OpenAI `image_url` / `input_image` parts with base64 `data:` URLs (jpeg, png, gif, webp) are forwarded as Lumo images. With encryption on (the default), image bytes are U2L-encrypted with the per-request key exactly like the web client; plaintext images are never sent. Remote http(s) URLs are not fetched (no SSRF from the proxy). Like the web client, only the 10 most recent images of a conversation are sent. Images are not persisted or synced. Raise `server.bodyLimit` (default `1mb`) for large screenshots.  
 Outbound: generated images are streamed as markdown data URLs (`![lumo:<id>](data:image/png;base64,...)`). The `lumo:<id>` alt text is the Proton image id, so a later `edit_image` / `describe_image` can find it.
 
 ### Web Search

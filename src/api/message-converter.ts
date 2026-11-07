@@ -14,6 +14,9 @@ import {
   resolveClientToolName,
 } from './tools/call-id.js';
 import { type MessageForStore } from 'src/conversations/types.js';
+import type { WireImage } from '@lumo/types-api.js';
+import { parseImageUrl } from '../lumo-client/images.js';
+import { logger } from '../app/logger.js';
 
 /**
  * Extract text from OpenAI-compatible content shapes.
@@ -49,6 +52,40 @@ function extractTextContent(content: unknown): string {
   }
 
   return '';
+}
+
+/**
+ * Extract image inputs from OpenAI-compatible content parts.
+ * Supports:
+ * - Chat Completions: { type: 'image_url', image_url: { url } } (or image_url as a string)
+ * - Responses API:    { type: 'input_image', image_url: '...' }
+ *
+ * Images that can't be used are reported as notes so the model knows one was omitted.
+ */
+export function extractImageContent(content: unknown): { images: WireImage[]; notes: string[] } {
+  const images: WireImage[] = [];
+  const notes: string[] = [];
+  if (!Array.isArray(content)) return { images, notes };
+
+  for (const item of content) {
+    if (typeof item !== 'object' || item === null) continue;
+    const obj = item as Record<string, unknown>;
+    if (obj.type !== 'image_url' && obj.type !== 'input_image') continue;
+
+    const ref = obj.image_url;
+    const url = typeof ref === 'string'
+      ? ref
+      : (typeof ref === 'object' && ref !== null ? (ref as Record<string, unknown>).url : undefined);
+
+    const parsed = parseImageUrl(url);
+    if (parsed.ok) {
+      images.push(parsed.image);
+    } else {
+      logger.warn({ reason: parsed.reason }, 'Skipping image input');
+      notes.push(`[Image omitted: ${parsed.reason}]`);
+    }
+  }
+  return { images, notes };
 }
 
 /**
@@ -156,11 +193,19 @@ export async function convertOpenAIChatMessages(messages: OpenAIChatMessage[]): 
       continue;
     }
 
-    const text = extractTextContent('content' in msg ? msg.content : undefined);
-    result.push({
-      role: msg.role === 'user' ? Role.User : Role.Assistant,
-      content: text,
-    });
+    const rawContent = 'content' in msg ? msg.content : undefined;
+    const text = extractTextContent(rawContent);
+    const role = msg.role === 'user' ? Role.User : Role.Assistant;
+
+    // Images are user input only (Lumo vision); assistant images are not replayed.
+    if (role === Role.User) {
+      const { images, notes } = extractImageContent(rawContent);
+      const content = [text, ...notes].filter(Boolean).join('\n');
+      result.push(images.length > 0 ? { role, content, images } : { role, content });
+      continue;
+    }
+
+    result.push({ role, content: text });
   }
 
   return result;

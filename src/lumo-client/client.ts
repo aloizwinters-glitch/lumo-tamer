@@ -40,6 +40,7 @@ import { estimatePromptTokens } from '../app/token-estimate.js';
 import { injectInstructionsIntoTurns } from './instructions.js';
 import { NativeToolCallProcessor, type NativeToolCallResult } from '../api/tools/native-tool-call-processor.js';
 import { postProcessTitle } from '@lumo/lib/lumo-api-client/utils.js';
+import { countImages, encryptTurnImages, hasPlaintextImages, limitImages, stripImages } from './images.js';
 
 // Re-export types for external consumers
 export type { LumoClientOptions, ChatResult };
@@ -274,7 +275,11 @@ export class LumoClient {
             const requestId = generateRequestId();
             const encryptionParams = new RequestEncryptionParams(requestKey, requestId);
             const requestKeyEncB64 = await encryptionParams.encryptRequestKey(DEFAULT_LUMO_PUB_KEY);
-            processedTurns = await encryptTurns(turns, encryptionParams);
+            processedTurns = await encryptTurnImages(await encryptTurns(turns, encryptionParams), encryptionParams);
+            if (hasPlaintextImages(processedTurns)) {
+                // Never let an image leave the proxy unencrypted when U2L is on.
+                throw new Error('Refusing to send unencrypted image with encryption enabled');
+            }
             encryption = { requestKeyEncB64, requestId: encryptionParams.requestId };
             encryptionContext = { requestKey: encryptionParams.requestKey, requestId: encryptionParams.requestId };
         }
@@ -354,6 +359,15 @@ export class LumoClient {
             ? (chunk: string) => { bufferedChunks.push(chunk); }
             : onChunk;
 
+        // Only the most recent images are sent (upstream MAX_IMAGES_PER_REQUEST).
+        const imageCount = countImages(turns);
+        if (imageCount > 0) {
+            const limited = limitImages(turns);
+            const dropped = imageCount - countImages(limited);
+            logger.info({ images: imageCount - dropped, dropped }, 'Sending image input');
+            turns = limited;
+        }
+
         const turn = turns[turns.length - 1];
         const logConfig = getLogConfig();
 
@@ -378,7 +392,7 @@ export class LumoClient {
         // Title generation is a separate, concurrent, non-fatal completion.
         // Only at the top level: a bounce must not launch its own title request.
         const titlePromise = requestTitle && !isBounce
-            ? this.runCompletion(turns, {
+            ? this.runCompletion(stripImages(turns), {
                 endpoint,
                 tier: modelTier,
                 enableReasoning: false,
