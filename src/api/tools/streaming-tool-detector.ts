@@ -19,15 +19,23 @@
  * did not register.
  */
 
-import { JsonBraceTracker } from './json-brace-tracker.js';
-import { isToolCallJson, parseToolCallJson, type ParsedToolCall } from './types.js';
-import { logger } from '../../app/logger.js';
-import { getCustomToolsConfig } from '../../app/config.js';
-import { stripToolPrefix } from './prefix.js';
-import { getMetrics } from '../../app/metrics.js';
-import { extractToolCalls, stripFenceNoise, stripTrailingFenceJunk } from './extract.js';
+import { JsonBraceTracker } from "./json-brace-tracker.js";
+import {
+  isToolCallJson,
+  parseToolCallJson,
+  type ParsedToolCall,
+} from "./types.js";
+import { logger } from "../../app/logger.js";
+import { getCustomToolsConfig } from "../../app/config.js";
+import { stripToolPrefix } from "./prefix.js";
+import { getMetrics } from "../../app/metrics.js";
+import {
+  extractToolCalls,
+  stripFenceNoise,
+  stripTrailingFenceJunk,
+} from "./extract.js";
 
-type DetectorState = 'normal' | 'in_code_fence' | 'in_raw_json';
+type DetectorState = "normal" | "in_code_fence" | "in_raw_json";
 
 export interface ProcessResult {
   /** Normal text to emit as content delta */
@@ -45,9 +53,11 @@ export interface StreamingToolDetectorOptions {
 }
 
 export class StreamingToolDetector {
-  private state: DetectorState = 'normal';
-  private buffer = '';
-  private pendingText = '';
+  private state: DetectorState = "normal";
+  private buffer = "";
+  /** Opener of the fence currently being buffered, for verbatim re-emit. */
+  private fenceOpener = "```\n";
+  private pendingText = "";
   private jsonTracker = new JsonBraceTracker();
   private readonly knownToolNames: Set<string> | null;
   /** Set when Lumo echoed `[Tool Call: name]` and the next JSON is arguments-only. */
@@ -73,10 +83,41 @@ export class StreamingToolDetector {
   }
 
   private showSnippet(index: number) {
-    return this.pendingText.substring(Math.max(index - 7, 0), index + 7).replace(/\n/g, "\\n");
+    return this.pendingText
+      .substring(Math.max(index - 7, 0), index + 7)
+      .replace(/\n/g, "\\n");
   }
 
-  public getPendingText(){
+  /** First backtick run that actually opens a fence, or null. */
+  private findFenceOpener(): { index: number; matched: string } | null {
+    const re = /```(?:json)?\s*\n?/g;
+    for (const m of this.pendingText.matchAll(re)) {
+      if (m.index !== undefined && this.opensFenceAt(m.index, m[0])) {
+        return { index: m.index, matched: m[0] };
+      }
+    }
+    return null;
+  }
+
+  /**
+   * CommonMark: fences open at line start (up to 3 spaces indent).
+   * Mid-line, only a ```json tag directly before its payload opens a fence
+   * (Lumo emits tool fences right after a colon). A bare inline ``` in
+   * prose never does: it would buffer prose as a fake code body and
+   * swallow the next real tool call into that buffer.
+   */
+  private opensFenceAt(index: number, matched: string): boolean {
+    const before = this.pendingText.slice(0, index);
+    if (before === "" || /(?:^|\n)[ \t]{0,3}$/.test(before)) return true;
+    if (!matched.startsWith("```json")) return false;
+    // Chunk boundary: defer instead of opening speculatively — prose after
+    // the tag must not become fence body. The keep-tail holds the tag until
+    // the next chunk shows what follows.
+    const after = this.pendingText.slice(index + matched.length);
+    return /^\{/.test(after);
+  }
+
+  public getPendingText() {
     return this.pendingText;
   }
 
@@ -85,7 +126,7 @@ export class StreamingToolDetector {
    */
   processChunk(chunk: string): ProcessResult {
     const result: ProcessResult = {
-      textToEmit: '',
+      textToEmit: "",
       completedToolCalls: [],
     };
 
@@ -96,11 +137,11 @@ export class StreamingToolDetector {
       const prevPendingLength = this.pendingText.length;
       const prevState = this.state;
 
-      if (this.state === 'normal') {
+      if (this.state === "normal") {
         this.processNormalState(result);
-      } else if (this.state === 'in_code_fence') {
+      } else if (this.state === "in_code_fence") {
         this.processCodeFenceState(result);
-      } else if (this.state === 'in_raw_json') {
+      } else if (this.state === "in_raw_json") {
         this.processRawJsonState(result);
       }
 
@@ -122,11 +163,11 @@ export class StreamingToolDetector {
    */
   private processNormalState(result: ProcessResult): void {
     if (this.headerToolName) {
-      const ws = this.pendingText.match(/^[ \t\n]*/)?.[0] ?? '';
+      const ws = this.pendingText.match(/^[ \t\n]*/)?.[0] ?? "";
       const rest = this.pendingText.slice(ws.length);
-      if (rest.startsWith('{')) {
+      if (rest.startsWith("{")) {
         this.pendingText = rest;
-        this.state = 'in_raw_json';
+        this.state = "in_raw_json";
         this.jsonTracker.reset();
         return;
       }
@@ -138,18 +179,26 @@ export class StreamingToolDetector {
     }
 
     // Look for code fence start
-    const fenceMatch = this.pendingText.match(/```(?:json)?\s*\n?/);
-    if (fenceMatch && fenceMatch.index !== undefined) {
+    const opener = this.findFenceOpener();
+    if (opener) {
+      logger.debug(
+        `Code block opener found: ${this.showSnippet(opener.index)}`,
+      );
 
-      logger.debug(`Code block opener found: ${this.showSnippet(fenceMatch.index)}`);
-
-      const before = stripTrailingFenceJunk(this.pendingText.slice(0, fenceMatch.index));
+      const before = stripTrailingFenceJunk(
+        this.pendingText.slice(0, opener.index),
+      );
       if (before) {
         result.textToEmit += before;
       }
-      this.pendingText = this.pendingText.slice(fenceMatch.index + fenceMatch[0].length);
-      this.state = 'in_code_fence';
-      this.buffer = '';
+      this.pendingText = this.pendingText.slice(
+        opener.index + opener.matched.length,
+      );
+      this.state = "in_code_fence";
+      this.buffer = "";
+      this.fenceOpener = opener.matched.endsWith("\n")
+        ? opener.matched
+        : opener.matched + "\n";
       return;
     }
 
@@ -172,10 +221,12 @@ export class StreamingToolDetector {
 
       // Emit text before the JSON (without leftover `json` / incomplete fence tags)
       if (startIdx > 0) {
-        result.textToEmit += stripTrailingFenceJunk(this.pendingText.slice(0, startIdx));
+        result.textToEmit += stripTrailingFenceJunk(
+          this.pendingText.slice(0, startIdx),
+        );
       }
       this.pendingText = this.pendingText.slice(startIdx);
-      this.state = 'in_raw_json';
+      this.state = "in_raw_json";
       this.jsonTracker.reset();
       return;
     }
@@ -217,17 +268,17 @@ export class StreamingToolDetector {
         if (escaped) {
           escaped = false;
         } else if (inString) {
-          if (ch === '\\') escaped = true;
+          if (ch === "\\") escaped = true;
           else if (ch === '"') inString = false;
         } else if (ch === '"') {
           inString = true;
-        } else if (ch === '`' && content.startsWith('```', i)) {
+        } else if (ch === "`" && content.startsWith("```", i)) {
           closeIndex = i;
           break;
         }
       }
       if (closeIndex !== -1) {
-        logger.debug('Code block ending found (fence outside JSON string)');
+        logger.debug("Code block ending found (fence outside JSON string)");
         this.buffer = content.slice(0, closeIndex);
         this.pendingText = content.slice(closeIndex + 3);
         this.completeCodeFence(result);
@@ -236,7 +287,7 @@ export class StreamingToolDetector {
       // No closer outside a string yet. Keep buffering; a partial fence at
       // the tail is re-scanned once more characters arrive.
       this.buffer = content;
-      this.pendingText = '';
+      this.pendingText = "";
       return;
     }
 
@@ -246,13 +297,18 @@ export class StreamingToolDetector {
       const before = this.pendingText.slice(0, endMatch.index);
       const after = this.pendingText.slice(endMatch.index + 3);
       // ```json```json{...} — the second ``` is another opener, not a close.
-      if ((this.buffer + before).trim() === '' && /^(?:json)?\s*(?:\n|\{|`)/i.test(after)) {
-        this.pendingText = after.replace(/^json\s*/i, '');
-        logger.debug('[tools] nested ```json opener, still in fence');
+      if (
+        (this.buffer + before).trim() === "" &&
+        /^(?:json)?\s*(?:\n|\{|`)/i.test(after)
+      ) {
+        this.pendingText = after.replace(/^json\s*/i, "");
+        logger.debug("[tools] nested ```json opener, still in fence");
         return;
       }
 
-      logger.debug(`Code block ending found: ${this.showSnippet(endMatch.index)}`);
+      logger.debug(
+        `Code block ending found: ${this.showSnippet(endMatch.index)}`,
+      );
       this.buffer += before;
       this.pendingText = after;
       this.completeCodeFence(result);
@@ -261,10 +317,10 @@ export class StreamingToolDetector {
 
     // No closing fence in pendingText - buffer it and check if buffer now ends with ```
     this.buffer += this.pendingText;
-    this.pendingText = '';
+    this.pendingText = "";
 
-    if (this.buffer.endsWith('```')) {
-      logger.debug('Code block ending found at end of buffer');
+    if (this.buffer.endsWith("```")) {
+      logger.debug("Code block ending found at end of buffer");
       this.buffer = this.buffer.slice(0, -3);
       this.completeCodeFence(result);
     }
@@ -272,40 +328,38 @@ export class StreamingToolDetector {
 
   /** Complete a code fence: parse buffer as tool call or emit as text. */
   private completeCodeFence(result: ProcessResult): void {
-    this.state = 'normal';
+    this.state = "normal";
 
     this.buffer = stripFenceNoise(this.buffer);
 
     const calls = this.parseAllToolCalls(this.buffer);
     if (calls.length > 0) {
       for (const call of calls) this.noteNamedCall(call, result);
-    } else if (this.buffer === '') {
-      logger.debug('[tools] dropped empty json fence');
+    } else if (this.buffer === "") {
+      logger.debug("[tools] dropped empty json fence");
     } else {
-      // Re-emit as valid markdown: the closer must sit on its own line.
-      // An inline closer (text right before the ticks, as models often
-      // emit after a list line) never terminates the block in the
-      // client renderer, which then swallows the rest of the reply as
-      // fake code — seen live as the lone-fence reply corruption.
-      const body = this.buffer.replace(/\n+$/, '');
-      result.textToEmit += '```\n' + body + '\n```';
+      // Re-emit verbatim with the opener's language tag: the closer must
+      // sit on its own line. An inline closer (text right before the
+      // ticks) never terminates the block in the client renderer, which
+      // then swallows the rest of the reply as fake code.
+      const body = this.buffer.replace(/\n+$/, "");
+      result.textToEmit += this.fenceOpener + body + "\n```";
     }
-    this.buffer = '';
+    this.buffer = "";
   }
-
-
 
   /**
    * Process raw JSON state - delegates to JsonBraceTracker for brace-depth
    * tracking with proper string/escape handling across chunk boundaries.
    */
   private processRawJsonState(result: ProcessResult): void {
-    const { results: completedJsons, remainder } = this.jsonTracker.feedWithRemainder(this.pendingText);
+    const { results: completedJsons, remainder } =
+      this.jsonTracker.feedWithRemainder(this.pendingText);
 
     if (completedJsons.length > 0) {
       // At least one JSON object completed
       for (const json of completedJsons) {
-        logger.debug('Raw JSON ending found');
+        logger.debug("Raw JSON ending found");
         const trimmed = json.trim();
         const calls = this.parseAllToolCalls(trimmed);
         if (calls.length > 0) {
@@ -317,8 +371,8 @@ export class StreamingToolDetector {
           } else {
             this.headerToolName = null;
             logger.info(
-              { snippet: json.replace(/\n/g, ' ').substring(0, 180) },
-              '[tools] not executed: JSON is not a tool call, leaked as text',
+              { snippet: json.replace(/\n/g, " ").substring(0, 180) },
+              "[tools] not executed: JSON is not a tool call, leaked as text",
             );
             result.textToEmit += json;
           }
@@ -327,7 +381,7 @@ export class StreamingToolDetector {
 
       // Remainder goes back to pendingText for normal-state processing
       this.pendingText = remainder;
-      this.state = 'normal';
+      this.state = "normal";
     } else {
       const buf = this.jsonTracker.getBuffer();
       const nameHits = buf.match(/\{\s*"name"\s*:\s*"user:/g);
@@ -336,22 +390,26 @@ export class StreamingToolDetector {
         if (calls.length > 0) {
           for (const call of calls) this.noteNamedCall(call, result);
           this.jsonTracker.reset();
-          this.pendingText = '';
-          this.state = 'normal';
+          this.pendingText = "";
+          this.state = "normal";
           return;
         }
       }
-      this.pendingText = '';
+      this.pendingText = "";
     }
   }
 
   /**
    * Lumo sometimes copies the flatten marker instead of {"name","arguments"}.
    */
-  private findHistoryHeader(): { index: number; end: number; name: string } | null {
+  private findHistoryHeader(): {
+    index: number;
+    end: number;
+    name: string;
+  } | null {
     const match = this.pendingText.match(StreamingToolDetector.HISTORY_HEADER);
     if (!match || match.index === undefined) return null;
-    const rawName = (match[2] ?? match[3] ?? '').trim();
+    const rawName = (match[2] ?? match[3] ?? "").trim();
     if (!rawName) return null;
     const prefix = getCustomToolsConfig().prefix;
     const name = stripToolPrefix(rawName, prefix);
@@ -375,11 +433,17 @@ export class StreamingToolDetector {
 
   private holdHistoryCall(toolCall: ParsedToolCall): void {
     if (this.sawNamedCall) {
-      logger.debug({ tool: toolCall.name }, 'Dropping history-format echo; named call already seen');
+      logger.debug(
+        { tool: toolCall.name },
+        "Dropping history-format echo; named call already seen",
+      );
       return;
     }
     this.pendingHistoryCall = toolCall;
-    logger.debug({ tool: toolCall.name }, 'Holding history-format echo until stream end');
+    logger.debug(
+      { tool: toolCall.name },
+      "Holding history-format echo until stream end",
+    );
   }
 
   /**
@@ -389,7 +453,11 @@ export class StreamingToolDetector {
     if (!this.headerToolName) return null;
     try {
       const parsed = JSON.parse(content) as unknown;
-      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      if (
+        typeof parsed !== "object" ||
+        parsed === null ||
+        Array.isArray(parsed)
+      ) {
         return null;
       }
       const name = this.headerToolName;
@@ -405,8 +473,12 @@ export class StreamingToolDetector {
    * Prefers the earliest of: own-line `{ "`, or mid-line `{"name":`.
    */
   private findRawJsonStart(): number | null {
-    const lineMatch = this.pendingText.match(StreamingToolDetector.LINE_START_JSON);
-    const inlineMatch = this.pendingText.match(StreamingToolDetector.INLINE_TOOL_JSON);
+    const lineMatch = this.pendingText.match(
+      StreamingToolDetector.LINE_START_JSON,
+    );
+    const inlineMatch = this.pendingText.match(
+      StreamingToolDetector.INLINE_TOOL_JSON,
+    );
 
     let startIdx: number | undefined;
     if (lineMatch && lineMatch.index !== undefined) {
@@ -454,9 +526,19 @@ export class StreamingToolDetector {
    * Log and track an invalid tool call attempt.
    * Only called when we've determined this was actually a tool call attempt (has a name).
    */
-  private trackInvalidToolCall(reason: string, content: string, toolName: string): void {
-    logger.info(`Invalid tool call (${reason}): ${content.replace(/\n/g, ' ')}`);
-    getMetrics()?.toolCallsTotal.inc({ type: 'custom', status: 'invalid', tool_name: toolName });
+  private trackInvalidToolCall(
+    reason: string,
+    content: string,
+    toolName: string,
+  ): void {
+    logger.info(
+      `Invalid tool call (${reason}): ${content.replace(/\n/g, " ")}`,
+    );
+    getMetrics()?.toolCallsTotal.inc({
+      type: "custom",
+      status: "invalid",
+      tool_name: toolName,
+    });
   }
 
   /** Strict JSON, then jammed objects, then lenient strings (newlines / quotes). */
@@ -468,21 +550,32 @@ export class StreamingToolDetector {
       const toolName = stripToolPrefix(call.name, prefix);
       const canonical = this.matchKnownTool(toolName);
       if (!canonical) {
-        logger.info({ toolName }, '[tools] not executed: name not in client tools[]');
+        logger.info(
+          { toolName },
+          "[tools] not executed: name not in client tools[]",
+        );
         continue;
       }
-      logger.info(`Tool call detected: ${canonical} ${JSON.stringify(call.arguments).substring(0, 80)}...`);
+      logger.info(
+        `Tool call detected: ${canonical} ${JSON.stringify(call.arguments).substring(0, 80)}...`,
+      );
       calls.push({ name: canonical, arguments: call.arguments });
     }
     if (calls.length === 0) {
       this.tryParseToolCall(content);
     } else if (extracted.length > 1) {
-      logger.info({ count: calls.length }, '[tools] recovered multiple tool calls from one blob');
+      logger.info(
+        { count: calls.length },
+        "[tools] recovered multiple tool calls from one blob",
+      );
     }
     return calls;
   }
 
-  private tryParseToolCall(content: string, logInvalid = true): ParsedToolCall | null {
+  private tryParseToolCall(
+    content: string,
+    logInvalid = true,
+  ): ParsedToolCall | null {
     try {
       const parsed = JSON.parse(content);
       if (isToolCallJson(parsed)) {
@@ -492,30 +585,36 @@ export class StreamingToolDetector {
         const toolName = stripToolPrefix(normalized.name, prefix);
         const canonical = this.matchKnownTool(toolName);
         if (!canonical) {
-          logger.info({ toolName }, '[tools] not executed: name not in client tools[]');
+          logger.info(
+            { toolName },
+            "[tools] not executed: name not in client tools[]",
+          );
           return null;
         }
-        logger.info(`Tool call detected: ${content.replace(/\n/g, ' ').substring(0, 100)}...`);
+        logger.info(
+          `Tool call detected: ${content.replace(/\n/g, " ").substring(0, 100)}...`,
+        );
         return {
           name: canonical,
           arguments: normalized.arguments,
         };
       }
       // JSON parsed but schema invalid - only track if it has a name (looks like attempted tool call)
-      if ('name' in parsed && typeof parsed.name === 'string') {
+      if ("name" in parsed && typeof parsed.name === "string") {
         const prefix = getCustomToolsConfig().prefix;
         const toolName = stripToolPrefix(parsed.name, prefix);
         if (!this.isKnownTool(toolName)) {
           return null;
         }
-        if (logInvalid) this.trackInvalidToolCall('missing arguments', content, toolName);
+        if (logInvalid)
+          this.trackInvalidToolCall("missing arguments", content, toolName);
       }
       // Otherwise it's just regular JSON, don't track
     } catch {
       // JSON parse failed - only track if regex finds a name (looks like attempted tool call)
       const toolName = this.extractToolName(content);
       if (logInvalid && toolName && this.isKnownTool(toolName)) {
-        this.trackInvalidToolCall('malformed JSON', content, toolName);
+        this.trackInvalidToolCall("malformed JSON", content, toolName);
       }
       // Otherwise it's just broken/regular JSON, don't track
     }
@@ -527,7 +626,7 @@ export class StreamingToolDetector {
    */
   finalize(): ProcessResult {
     const result: ProcessResult = {
-      textToEmit: '',
+      textToEmit: "",
       completedToolCalls: [],
     };
 
@@ -536,23 +635,26 @@ export class StreamingToolDetector {
     // Emit any remaining pending text
     if (this.pendingText) {
       result.textToEmit += this.pendingText;
-      this.pendingText = '';
+      this.pendingText = "";
     }
 
     // If we were in the middle of parsing, try to salvage before emitting as text
-    if (this.state !== 'normal') {
-      const trackerBuffer = this.state === 'in_raw_json' ? this.jsonTracker.getBuffer() : this.buffer;
+    if (this.state !== "normal") {
+      const trackerBuffer =
+        this.state === "in_raw_json"
+          ? this.jsonTracker.getBuffer()
+          : this.buffer;
 
       if (trackerBuffer) {
         // End-of-stream fallback: try JSON.parse on the complete buffer.
         // Catches edge cases where char-by-char tracking failed but JSON is actually complete.
-        if (this.state === 'in_raw_json') {
+        if (this.state === "in_raw_json") {
           const trimmed = trackerBuffer.trim();
           const calls = this.parseAllToolCalls(trimmed);
           if (calls.length > 0) {
             for (const call of calls) this.noteNamedCall(call, result);
             this.jsonTracker.reset();
-            this.state = 'normal';
+            this.state = "normal";
             this.flushHistoryCall(result);
             return result;
           }
@@ -560,37 +662,37 @@ export class StreamingToolDetector {
           if (fromHeader) {
             this.holdHistoryCall(fromHeader);
             this.jsonTracker.reset();
-            this.state = 'normal';
+            this.state = "normal";
             this.flushHistoryCall(result);
             return result;
           }
         }
 
-        if (this.state === 'in_code_fence') {
+        if (this.state === "in_code_fence") {
           const calls = this.parseAllToolCalls(stripFenceNoise(trackerBuffer));
           if (calls.length > 0) {
             for (const call of calls) this.noteNamedCall(call, result);
-            this.buffer = '';
+            this.buffer = "";
             this.jsonTracker.reset();
-            this.state = 'normal';
+            this.state = "normal";
             this.flushHistoryCall(result);
             return result;
           }
           // Unclosed fence at stream end: emit WITH a closer so the
           // client never receives a lone ``` that swallows
           // everything after it as fake code.
-          const body = trackerBuffer.replace(/\n+$/, '');
-          result.textToEmit += '```\n' + body + '\n```';
+          const body = trackerBuffer.replace(/\n+$/, "");
+          result.textToEmit += this.fenceOpener + body + "\n```";
         } else {
           result.textToEmit += trackerBuffer;
         }
       }
 
-      this.buffer = '';
+      this.buffer = "";
       this.jsonTracker.reset();
     }
 
-    this.state = 'normal';
+    this.state = "normal";
     this.flushHistoryCall(result);
     return result;
   }
