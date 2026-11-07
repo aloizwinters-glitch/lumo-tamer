@@ -67,7 +67,7 @@ describe('image input', () => {
           { type: 'input_text', text: 'What is it?' },
           { type: 'input_image', image_url: 'data:image/png;base64,iVBORw0KGgo=' },
         ],
-      } as never,
+      },
     ]);
     expect(turns[0].images).toHaveLength(1);
     expect(turns[0].content).toMatch(/^What is it\?\n<lumo-image id="[0-9a-f-]{36}" source="user" \/>$/);

@@ -154,8 +154,13 @@ export interface FunctionCallOutput {
   output: string;
 }
 
+/** Responses API content parts accepted on input messages (text + image input). */
+export type OpenAIResponseContentPart =
+  | { type: 'input_text' | 'output_text' | 'text'; text: string }
+  | { type: 'input_image'; image_url: string; detail?: 'low' | 'high' | 'auto' };
+
 export type OpenAIResponseMessage =
-  | { role: string; content: string }
+  | { role: string; content: string | OpenAIResponseContentPart[] }
   | FunctionCallOutput;
 
 export interface OpenAIResponseRequest {

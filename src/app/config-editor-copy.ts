@@ -376,8 +376,8 @@ const COPY: Record<string, FieldCopy> = {
   'server.bodyLimit': {
     label: 'Max request body',
     hint: 'Max request body. Raise for OpenCode / large contexts.',
-    more: 'One size string, parsed by the bytes library. 1mb is about 60k tokens of ASCII. 360kb is roughly Lumo\'s 22.5K warning level. Use 50mb only if a client sends huge tool/context payloads.',
-    examples: sample('1mb'),
+    more: 'One size string, parsed by the bytes library. 1mb is about 60k tokens of ASCII. 360kb is roughly Lumo\'s 22.5K warning level. Default 10mb covers large coding contexts and base64 image input; go higher only for huge tool/context payloads.',
+    examples: sample('10mb'),
   },
   'server.metrics.enabled': {
     label: 'Prometheus /metrics',

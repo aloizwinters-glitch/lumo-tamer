@@ -46,6 +46,7 @@ import {
     encryptTurnImages,
     generatedImageMarkdown,
     hasPlaintextImages,
+    imagePayloadChars,
     limitImages,
     lumoImageMarker,
     stripImages,
@@ -332,8 +333,9 @@ export class LumoClient {
         });
 
         // Proton doesn't report prompt_tokens; estimate from request body so
-        // clients like OpenCode can make compaction decisions.
-        const bytes = Buffer.byteLength(JSON.stringify(body), 'utf8');
+        // clients like OpenCode can make compaction decisions. Image payloads are
+        // excluded: base64 bytes are not text tokens and would trigger early compaction.
+        const bytes = Math.max(0, Buffer.byteLength(JSON.stringify(body), 'utf8') - imagePayloadChars(processedTurns));
         const estimatedPromptTokens = estimatePromptTokens(
           bytes,
           getServerConfig().promptTokenEstimation,

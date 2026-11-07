@@ -50,7 +50,20 @@ export function parseImageUrl(url: unknown): ParsedImage {
     if (!data) {
         return { ok: false, reason: 'empty image data' };
     }
+    if (!isStrictBase64(data)) {
+        return { ok: false, reason: 'invalid base64 image data' };
+    }
     return { ok: true, mimeType, image: { encrypted: false, image_id: stableImageId(data), data } };
+}
+
+/** Canonical padded base64 only (Buffer.from(..., 'base64') silently skips garbage). */
+export function isStrictBase64(data: string): boolean {
+    return data.length % 4 === 0 && /^[A-Za-z0-9+/]*={0,2}$/.test(data);
+}
+
+/** Total base64 characters of image payloads (used to keep them out of token estimates). */
+export function imagePayloadChars(turns: Turn[]): number {
+    return turns.reduce((n, t) => n + (t.images ?? []).reduce((m, im) => m + im.data.length, 0), 0);
 }
 
 /**

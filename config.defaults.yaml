@@ -164,11 +164,9 @@ server:
     surfaceThinking: false
 
   # Max request body size
-  # Increase if clients send larger tool/context payloads, but be aware:
-  # 360kb (for a typical request, containing mainly ASCII characters)
-  # translates to roughly 22.5K tokens, which is Lumo's "warning level" on context size.
-  # Coding clients (OpenCode, etc.) send large contexts. 1mb ≈ ~60k tokens of ASCII.
-  bodyLimit: "1mb"
+  # Covers large coding contexts and base64-encoded image input (vision;
+  # 1mb ≈ ~60k tokens of ASCII, 360kb ≈ Lumo's 22.5K context warning level).
+  bodyLimit: "10mb"
 
   # Prometheus metrics endpoint
   metrics:

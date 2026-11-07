@@ -147,7 +147,7 @@ Set an API key in `config.yaml`:
 server:
   apiKey: my-super-secret-key
   port: 3003            #Optional, change listening port
-  bodyLimit: "1mb"      #Optional, default is 1mb (coding clients send large contexts)
+  bodyLimit: "10mb"     #Optional, default is 10mb (large contexts and base64 image input)
 ```
 
 Then run:
@@ -221,7 +221,7 @@ server:
   bodyLimit: "10mb"   # images travel base64-encoded; follow-ups resend them
 ```
 
-Inbound (vision): OpenAI `image_url` / `input_image` parts with base64 `data:` URLs (jpeg, png, gif, webp) are forwarded as Lumo images. With encryption on (the default), image bytes are U2L-encrypted with the per-request key exactly like the web client; plaintext images are never sent. Remote http(s) URLs are not fetched (no SSRF from the proxy). Like the web client, only the 10 most recent images of a conversation are sent. Images are not persisted or synced. Raise `server.bodyLimit` (default `1mb`) for large screenshots.  
+Inbound (vision): OpenAI `image_url` / `input_image` parts with base64 `data:` URLs (jpeg, png, gif, webp) are forwarded as Lumo images. With encryption on (the default), image bytes are U2L-encrypted with the per-request key exactly like the web client; plaintext images are never sent. Remote http(s) URLs are not fetched (no SSRF from the proxy). Like the web client, only the 10 most recent images of a conversation are sent. Images are not persisted or synced. The default `server.bodyLimit` of `10mb` covers typical screenshots; raise it for batches of large photos.  
 Outbound: generated images are streamed as markdown data URLs (`![lumo:<id>](data:image/jpeg;base64,...)`), decrypted in the proxy with the per-request key. The `lumo:<id>` alt text is the Proton image id: when the client sends that assistant message back, the proxy replays it like the web client (a `<lumo-image source="assistant">` marker plus the encrypted bytes), so a later `edit_image` / `describe_image` can find it. The stored conversation keeps only the marker, not the bytes.
 
 ### Web Search
