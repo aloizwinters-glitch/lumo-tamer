@@ -66,6 +66,37 @@ describe('buildChatCompletionsBody', () => {
         expect(body.lumo.target).toBe('title');
     });
 
+    it('serializes image turns as content parts (plaintext)', () => {
+        const png = 'iVBORw0KGgoAAAA';
+        const body = buildChatCompletionsBody({
+            turns: [{ role: Role.User, content: 'what is this?', images: [{ encrypted: false, image_id: 'i1', data: png }] }],
+            tier: 'auto', enableReasoning: false, encrypted: false,
+        });
+        expect(body.messages[0]).toEqual({
+            role: 'user',
+            content: [
+                { type: 'text', text: 'what is this?' },
+                { type: 'image_url', image_url: { url: `data:image/png;base64,${png}` } },
+            ],
+        });
+    });
+
+    it('flags encrypted image parts like the web client', () => {
+        const body = buildChatCompletionsBody({
+            turns: [{ role: Role.User, content: 'CT', encrypted: true, images: [{ encrypted: true, image_id: 'i1', data: 'IMGCT' }] }],
+            tier: 'auto', enableReasoning: false, encrypted: true,
+            encryption: { requestKeyEncB64: 'KEY', requestId: 'RID' },
+        });
+        expect(body.messages[0]).toEqual({
+            role: 'user',
+            content: [
+                { type: 'text', text: 'CT', encrypted: true },
+                { type: 'image_url', image_url: { url: 'data:application/octet-stream;base64,IMGCT', encrypted: true } },
+            ],
+            encrypted: true,
+        });
+    });
+
     it('maps tool roles to wire roles', () => {
         const body = buildChatCompletionsBody({
             turns: [

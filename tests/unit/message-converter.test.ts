@@ -9,6 +9,52 @@
 import { describe, it, expect } from 'vitest';
 import { convertOpenAIChatMessages, convertOpenAIResponseMessages, convertToolMessage } from '../../src/api/message-converter.js';
 
+describe('image input', () => {
+  it('extracts image_url parts from user messages', async () => {
+    const turns = await convertOpenAIChatMessages([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Describe this' },
+          { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,/9j/AAAA' } },
+        ],
+      },
+    ]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0].content).toBe('Describe this');
+    expect(turns[0].images).toHaveLength(1);
+    expect(turns[0].images![0]).toMatchObject({ encrypted: false, data: '/9j/AAAA' });
+  });
+
+  it('notes unsupported images instead of failing', async () => {
+    const turns = await convertOpenAIChatMessages([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Look' },
+          { type: 'image_url', image_url: { url: 'https://example.com/x.png' } },
+        ],
+      },
+    ]);
+    expect(turns[0].images).toBeUndefined();
+    expect(turns[0].content).toContain('[Image omitted:');
+  });
+
+  it('extracts Responses API input_image parts', async () => {
+    const turns = await convertOpenAIResponseMessages([
+      {
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'What is it?' },
+          { type: 'input_image', image_url: 'data:image/png;base64,iVBORw0KGgo=' },
+        ],
+      } as never,
+    ]);
+    expect(turns[0].images).toHaveLength(1);
+    expect(turns[0].content).toBe('What is it?');
+  });
+});
+
 describe('convertOpenAIChatMessages', () => {
   it('converts user and assistant messages', async () => {
     const turns = await convertOpenAIChatMessages([
