@@ -1,3 +1,67 @@
+## [0.7.0-dev.17](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.16...v0.7.0-dev.17) (2026-11-07)
+
+### Features
+
+* feat(images): native image generation and editing (generate/edit/describe_image)
+
+  Lumo can create and edit images like the website. Behind
+  `server.enableImageTools` (off by default, as the README documents):
+
+  - native-tools: advertise generate_image / describe_image / edit_image (the
+    web client's imageTools). They run server-side and mix with client tools,
+    so they don't depend on the native-tools routing switch.
+  - native-tool-call-processor: image tools are known native tools, so a
+    generate_image call is no longer treated as a misrouted custom tool (which
+    aborted the stream and bounced).
+  - v2-stream: parse `lumo.image_data` chunks (upstream
+    processLumoImageDataChunk).
+  - client: decrypt image bytes with the response AD
+    (`lumo.response.<id>.chunk`, upstream transforms/decrypt.ts), stream them to
+    the client as `![lumo:<id>](data:image/...;base64,...)` and keep only a
+    `<lumo-image source="assistant">` marker in the persisted text.
+  - message-converter: when that assistant message comes back, replay it like
+    the web client (marker + bytes, re-encrypted with the request key), so
+    edit_image / describe_image can find the image. User images now carry
+    `<lumo-image source="user">` markers too, with a stable content-derived id
+    so history and dedup hashes stay identical across requests.
+  - config: `enableImageTools` for server and CLI, with /config editor copy.
+  - docs: README Images section matches the implementation (drops the
+    undocumented images.maxInputBytes), OpenCode notes.
+* feat(images): send image input (vision) to Lumo, U2L-encrypted
+
+  Lumo can see images, but lumo-tamer dropped image parts and only forwarded
+  text. Inbound OpenAI image parts are now forwarded as Lumo images, using the
+  same wire format and encryption as Proton's web client.
+
+  - message-converter: extract `image_url` (Chat Completions) and `input_image`
+    (Responses) parts from user messages into WireImage turns. Only base64
+    data: URLs (jpeg/png/gif/webp) are accepted; remote URLs are not fetched
+    (no SSRF from the proxy) and an "[Image omitted: ...]" note is added instead.
+  - images.ts: encrypt image bytes with the per-request AES-GCM key and the
+    request AD (`lumo.request.<id>.turn`), mirroring upstream encryptImage in
+    WebClients packages/lumo-api-client/core/encryption.ts. Kept local so the
+    vendored packages/lumo stays untouched until the next upstream sync.
+  - client: encrypt images after encryptTurns(); refuse to send if any image
+    would leave in plaintext with encryption on. Keep only the 10 most recent
+    images (upstream MAX_IMAGES_PER_REQUEST). Title requests are text-only.
+  - v2-body: multimodal turns use the content-parts form with per-part
+    `encrypted` flags (upstream serializeMessages/toImagePart).
+  - Images are not persisted or synced (store keeps text only).
+  - docs: README inbound images + OpenCode attachment/modalities setup.
+
+### Bug Fixes
+
+* fix(images): strict base64, exclude image bytes from token estimate, Responses input types
+
+  Reject malformed base64 payloads instead of sending unusable images; keep
+  base64 image data out of the prompt-token estimate (it triggered premature
+  OpenCode compaction); type Responses API input_image content parts; anchor
+  the UUID test. Also raise the default server bodyLimit to 10mb — base64
+  image input (+33% overhead) outgrew 1mb. Docs and /config editor copy
+  stay in sync.
+
+  Co-authored-by: aloizwinters-glitch <324018590+aloizwinters-glitch@users.noreply.github.com>
+
 ## [0.7.0-dev.16](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.15...v0.7.0-dev.16) (2026-11-07)
 
 ### Features
