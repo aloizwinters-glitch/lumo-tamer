@@ -63,6 +63,7 @@ RUN npm ci
 # Copy source code
 COPY src ./src
 COPY packages ./packages
+COPY scripts ./scripts
 
 # Build TypeScript, then prune dev dependencies
 RUN npm run build && npm prune --production

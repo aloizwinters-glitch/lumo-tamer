@@ -5,6 +5,7 @@
  */
 
 import { APP_GITHUB_URL } from '../app/const.js';
+import { BUILD_COMMIT, BUILD_AT, isBuildStale } from '../app/version.js';
 
 const THEME_BOOT = `(function(){try{var t=localStorage.getItem('lumo-tamer-theme');if(t!=='light'&&t!=='dark'){t=matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}document.documentElement.setAttribute('data-theme',t);}catch(e){document.documentElement.setAttribute('data-theme','light');}})();`;
 
@@ -330,7 +331,11 @@ export function htmlPage(options: {
 }): string {
   const width = options.wide ? '74rem' : '26rem';
   const verTag = options.version ? ` <span class="ver">v${options.version}</span>` : '';
+  const buildTag = BUILD_COMMIT !== 'unknown'
+    ? ` <span class="ver build-tag" title="Built ${BUILD_AT ?? 'unknown'}${isBuildStale() ? ' — dist was rebuilt AFTER this process started: restart to serve it' : ''}">@${BUILD_COMMIT}${isBuildStale() ? ' · stale' : ''}</span>`
+    : '';
   const verCss = '.ver { color: var(--muted); font-size: 0.72rem; font-weight: 600; opacity: 0.8; }'
+    + '.build-tag.stale { color: var(--warn); opacity: 1; }';
   const navBtn = options.page === 'config'
     ? iconBtn('/logs', 'Logs', ICON_LOGS) + iconBtn('/auth', 'Account', ICON_ACCOUNT)
     : options.page === 'logs'
@@ -352,7 +357,7 @@ export function htmlPage(options: {
         <div class="mark">L</div>
         <div>
           <h1>lumo-tamer</h1>
-          <p>Unofficial Proton Lumo proxy${verTag}</p>
+          <p>Unofficial Proton Lumo proxy${verTag}${buildTag}</p>
         </div>
       </a>
       <div class="brand-actions">
