@@ -397,6 +397,11 @@ const COPY: Record<string, FieldCopy> = {
     hint: 'Lumo native web_search, weather, stock, crypto. Off so Lumo does not search unless you turn it on. On matches the Lumo website.',
     more: 'On: Lumo may call native web_search / weather / stock / crypto like the website. That mixes with custom tools and is a common source of misrouted calls. Off unless you want those extras.',
   },
+  'server.enableImageTools': {
+    label: 'Native image tools',
+    hint: 'Lumo generate_image, edit_image, describe_image. Off by default. Uses your Lumo image allowance.',
+    more: 'On: Lumo can create and edit images like the website. Generated images are decrypted in the proxy and streamed as markdown data URLs (![lumo:<id>](data:image/png;base64,...)); sending that message back lets Lumo edit the image. Raise the max request body for follow-ups.',
+  },
   'server.customTools.enabled': {
     label: 'Honor client tools',
     hint: 'Honor tools from HA, OpenCode, etc. Off ignores client tools.',
@@ -496,6 +501,10 @@ const COPY: Record<string, FieldCopy> = {
   'cli.enableWebSearch': {
     label: 'CLI native web search',
     hint: 'Native web search in the CLI. Same caveats as the server toggle.',
+  },
+  'cli.enableImageTools': {
+    label: 'CLI native image tools',
+    hint: 'Native image generation/editing in the CLI. Same as the server toggle.',
   },
   'cli.localActions.enabled': {
     label: 'Run local code blocks',
@@ -688,7 +697,7 @@ export function fieldCategory(path: string): string {
   if (path.startsWith('server.customTools.recovery.')) return 'recovery';
   if (path.startsWith('server.customTools.routing.')) return 'routing';
   if (path === 'server.customTools.enabled' || path === 'server.customTools.prefix') return 'toolsGeneral';
-  if (path === 'server.enableWebSearch') return 'toolsGeneral';
+  if (path === 'server.enableWebSearch' || path === 'server.enableImageTools') return 'toolsGeneral';
   if (path.startsWith('server.metrics.')) return 'metrics';
   if (path.startsWith('server.reasoning.')) return 'reasoning';
   if (

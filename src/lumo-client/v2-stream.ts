@@ -25,6 +25,8 @@ export type V2StreamMessage =
     | { type: 'token_data'; target: 'message' | 'reasoning' | 'tool_call'; content: string; encrypted?: boolean }
     | { type: 'server_tool_call'; call_id?: string; name: string; arguments?: string; encrypted?: boolean }
     | { type: 'server_tool_result'; call_id?: string; content: string; encrypted?: boolean }
+    /** Generated/edited image (`lumo.image_data`); `data` is base64 (U2L ciphertext when encrypted). */
+    | { type: 'image_data'; image_id: string; data: string; seed?: number; encrypted?: boolean }
     | { type: 'usage'; usage: LumoUsage }
     | { type: 'harmful' }
     | { type: 'error'; message?: string }
@@ -118,6 +120,23 @@ export class V2StreamProcessor {
                 content: tr.content ?? '',
                 ...(tr.encrypted ? { encrypted: true } : {}),
             });
+            return;
+        }
+
+        if (objectType === 'lumo.image_data') {
+            // Upstream processLumoImageDataChunk: { image: { id, data, seed?, encrypted? } }
+            const img = (obj.image ?? {}) as { id?: unknown; data?: unknown; seed?: unknown; encrypted?: unknown };
+            const imageId = pickString(img.id);
+            const data = pickString(img.data);
+            if (imageId && data) {
+                out.push({
+                    type: 'image_data',
+                    image_id: imageId,
+                    data,
+                    ...(typeof img.seed === 'number' ? { seed: img.seed } : {}),
+                    ...(pickBool(img.encrypted) ? { encrypted: true } : {}),
+                });
+            }
             return;
         }
 

@@ -47,6 +47,6 @@ Add Lumo to `provider` in your OpenCode `opencode.json` / `opencode.jsonc`:
 }
 ```
 
-**Images (vision):** to let OpenCode attach images/screenshots, add `"attachment": true` and `"modalities": { "input": ["text", "image"], "output": ["text"] }` to each Lumo model, and raise `server.bodyLimit` in `config.yaml` (e.g. `"10mb"`) since images are sent base64-encoded. Images are U2L-encrypted before they leave the proxy.
+**Images (vision):** to let OpenCode attach images/screenshots, add `"attachment": true` and `"modalities": { "input": ["text", "image"], "output": ["text"] }` to each Lumo model, and raise `server.bodyLimit` in `config.yaml` (e.g. `"10mb"`) since images are sent base64-encoded. Images are U2L-encrypted before they leave the proxy. To let Lumo create and edit images, set `server.enableImageTools: true`; generated images come back as markdown data-URL images in the reply, and asking to change "the previous image" makes Lumo call `edit_image` on it.
 
 The proxy reports `context_window` (131072) and `max_tokens` (13107) in each `/v1/models` entry, but keep the explicit `limit` block — OpenCode does not reliably auto-discover them. `reasoning_effort` accepts `none / minimal / low / medium / high / xhigh / default` (`minimal` and `xhigh` are OpenCode-compat aliases); your `server.reasoning.default` applies when the request sends none or `default`.

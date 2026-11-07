@@ -6,7 +6,11 @@ import {
     encryptTurnImages,
     hasPlaintextImages,
     MAX_IMAGES_PER_REQUEST,
+    extractGeneratedImages,
+    generatedImageMarkdown,
+    stableImageId,
 } from '../../src/lumo-client/images.js';
+import { selectNativeTools } from '../../src/lumo-client/native-tools.js';
 import { Role, type Turn } from '../../src/lumo-client/types.js';
 import { decryptUint8Array } from '@lumo/crypto/index.js';
 import {
@@ -38,6 +42,34 @@ describe('parseImageUrl', () => {
     it('rejects unsupported MIME types', () => {
         const r = parseImageUrl('data:image/svg+xml;base64,PHN2Zz4=');
         expect(r.ok).toBe(false);
+    });
+});
+
+describe('generated images', () => {
+    it('round-trips markdown -> marker + WireImage', () => {
+        const md = `Here:${generatedImageMarkdown('abc', PNG_B64)}Nice?`;
+        expect(md).toContain(`![lumo:abc](data:image/png;base64,${PNG_B64})`);
+        const { content, images } = extractGeneratedImages(md);
+        expect(content).toBe('Here:\n\n<lumo-image id="abc" source="assistant" />\n\nNice?');
+        expect(images).toEqual([{ encrypted: false, image_id: 'abc', data: PNG_B64 }]);
+    });
+
+    it('leaves ordinary markdown images alone', () => {
+        const text = '![cat](https://example.com/cat.png)';
+        expect(extractGeneratedImages(text)).toEqual({ content: text, images: [] });
+    });
+
+    it('stableImageId is deterministic and UUID-shaped', () => {
+        expect(stableImageId(PNG_B64)).toBe(stableImageId(PNG_B64));
+        expect(stableImageId(PNG_B64)).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    });
+});
+
+describe('selectNativeTools', () => {
+    it('adds image tools independently of internal tools', () => {
+        expect(selectNativeTools({ includeInternal: false, webSearch: false, imageTools: true }))
+            .toEqual(['generate_image', 'describe_image', 'edit_image']);
+        expect(selectNativeTools({ includeInternal: false, webSearch: false })).toEqual([]);
     });
 });
 
