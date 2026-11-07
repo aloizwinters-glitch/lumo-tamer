@@ -9,6 +9,7 @@ import {
     extractGeneratedImages,
     generatedImageMarkdown,
     stableImageId,
+    imagePayloadChars,
 } from '../../src/lumo-client/images.js';
 import { selectNativeTools } from '../../src/lumo-client/native-tools.js';
 import { Role, type Turn } from '../../src/lumo-client/types.js';
@@ -30,8 +31,21 @@ describe('parseImageUrl', () => {
         if (r.ok) {
             expect(r.image.data).toBe(PNG_B64);
             expect(r.image.encrypted).toBe(false);
-            expect(r.image.image_id).toMatch(/[0-9a-f-]{36}/);
+            expect(r.image.image_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
         }
+    });
+
+    it('rejects malformed base64 payloads', () => {
+        expect(parseImageUrl('data:image/png;base64,not*base64!!').ok).toBe(false);
+        expect(parseImageUrl('data:image/png;base64,abc').ok).toBe(false); // bad length
+        expect(parseImageUrl('data:image/png;base64,ab=c').ok).toBe(false); // padding inside
+    });
+
+    it('imagePayloadChars counts only image data', () => {
+        expect(imagePayloadChars([
+            { role: Role.User, content: 'hello', images: [img('1'), img('2')] },
+            { role: Role.Assistant, content: 'x' },
+        ])).toBe(PNG_B64.length * 2);
     });
 
     it('rejects remote URLs (no fetching from the proxy)', () => {
