@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { EndpointDependencies } from '../types.js';
-import { VERSION } from '../../app/version.js';
+import { VERSION, BUILD_COMMIT, BUILD_AT, isBuildStale } from '../../app/version.js';
 import { getCachedUpdateStatus } from '../../app/updates.js';
 
 export function createHealthRouter(deps: EndpointDependencies): Router {
@@ -16,6 +16,14 @@ export function createHealthRouter(deps: EndpointDependencies): Router {
     res.json({
       status: 'ok',
       version: VERSION,
+      ...(BUILD_AT ? {
+        build: {
+          commit: BUILD_COMMIT,
+          builtAt: BUILD_AT,
+          // true = dist was rebuilt after this process started: restart to serve it
+          stale: isBuildStale(),
+        },
+      } : {}),
       queue: {
         size: deps.queue.getSize(),
         pending: deps.queue.getPending(),
