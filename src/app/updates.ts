@@ -6,20 +6,21 @@
  * requires LUMO_TAMER_IMAGE in .env to match.
  */
 
-import { APP, DOCKER_UPDATE, GITHUB } from './const.js';
-import { VERSION } from './version.js';
-import { getUpdatesConfig, type UpdatesConfig } from './config.js';
-import { logger } from './logger.js';
+import { APP, DOCKER_UPDATE, GITHUB } from "./const.js";
+import { VERSION } from "./version.js";
+import { getUpdatesConfig, type UpdatesConfig } from "./config.js";
+import { logger } from "./logger.js";
+import { isGitUpdateable, applyGitUpdate } from "./git-update.js";
 import {
   dockerEngineReachable,
   dockerSocketAvailable,
   pullAndSpawnHelper,
   recreateContainer,
   selfContainerName,
-} from './docker-update.js';
+} from "./docker-update.js";
 
-export type UpdateChannel = 'stable' | 'dev';
-export type UpdateAction = 'none' | 'update' | 'switch' | 'downgrade';
+export type UpdateChannel = "stable" | "dev";
+export type UpdateAction = "none" | "update" | "switch" | "downgrade";
 
 export interface GithubRelease {
   tag_name: string;
@@ -48,11 +49,13 @@ export interface UpdateStatus {
 }
 
 export function channelFromVersion(version: string): UpdateChannel {
-  return parseVersion(version).pre.length > 0 ? 'dev' : 'stable';
+  return parseVersion(version).pre.length > 0 ? "dev" : "stable";
 }
 
-export function githubBranchForChannel(channel: UpdateChannel): typeof GITHUB.STABLE_BRANCH | typeof GITHUB.DEV_BRANCH {
-  return channel === 'stable' ? GITHUB.STABLE_BRANCH : GITHUB.DEV_BRANCH;
+export function githubBranchForChannel(
+  channel: UpdateChannel,
+): typeof GITHUB.STABLE_BRANCH | typeof GITHUB.DEV_BRANCH {
+  return channel === "stable" ? GITHUB.STABLE_BRANCH : GITHUB.DEV_BRANCH;
 }
 
 let cached: UpdateStatus | null = null;
@@ -60,24 +63,36 @@ let checker: NodeJS.Timeout | undefined;
 let applying = false;
 
 export function parseRepository(input: string): string {
-  const trimmed = input.trim().replace(/\/+$/, '').replace(/\.git$/i, '');
+  const trimmed = input
+    .trim()
+    .replace(/\/+$/, "")
+    .replace(/\.git$/i, "");
   const fromUrl = trimmed.match(/github\.com[:/]+([^/]+\/[^/]+)/i);
-  const repo = (fromUrl ? fromUrl[1] : trimmed).replace(/\.git$/i, '');
+  const repo = (fromUrl ? fromUrl[1] : trimmed).replace(/\.git$/i, "");
   if (!/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repo)) {
-    throw new Error('updates.repository must be owner/repo or a github.com URL');
+    throw new Error(
+      "updates.repository must be owner/repo or a github.com URL",
+    );
   }
   return repo;
 }
 
-export function channelImageTag(channel: UpdateChannel): typeof DOCKER_UPDATE.STABLE_TAG | typeof DOCKER_UPDATE.DEV_TAG {
-  return channel === 'stable' ? DOCKER_UPDATE.STABLE_TAG : DOCKER_UPDATE.DEV_TAG;
+export function channelImageTag(
+  channel: UpdateChannel,
+): typeof DOCKER_UPDATE.STABLE_TAG | typeof DOCKER_UPDATE.DEV_TAG {
+  return channel === "stable"
+    ? DOCKER_UPDATE.STABLE_TAG
+    : DOCKER_UPDATE.DEV_TAG;
 }
 
 export function channelFromImageTag(tag: string): UpdateChannel {
-  return tag === DOCKER_UPDATE.DEV_TAG ? 'dev' : 'stable';
+  return tag === DOCKER_UPDATE.DEV_TAG ? "dev" : "stable";
 }
 
-export function targetImageRef(repository: string, channel: UpdateChannel): string {
+export function targetImageRef(
+  repository: string,
+  channel: UpdateChannel,
+): string {
   return `${APP.GHCR_REGISTRY}/${parseRepository(repository)}:${channelImageTag(channel)}`;
 }
 
@@ -89,10 +104,11 @@ export function pickRelease(
   releases: GithubRelease[],
   channel: UpdateChannel,
 ): GithubRelease | null {
-  const list = channel === 'stable'
-    ? releases.filter((r) => !r.prerelease && !/-dev\./i.test(r.tag_name))
-    : releases.filter((r) => r.prerelease || /-dev\./i.test(r.tag_name));
-  const pool = list.length > 0 ? list : (channel === 'dev' ? [...releases] : []);
+  const list =
+    channel === "stable"
+      ? releases.filter((r) => !r.prerelease && !/-dev\./i.test(r.tag_name))
+      : releases.filter((r) => r.prerelease || /-dev\./i.test(r.tag_name));
+  const pool = list.length > 0 ? list : channel === "dev" ? [...releases] : [];
   pool.sort((a, b) => {
     const byVer = compareVersions(b.tag_name, a.tag_name);
     if (byVer !== 0) return byVer;
@@ -108,21 +124,21 @@ export function classifyTrack(opts: {
   latestOnChannel: string | null;
 }): { action: UpdateAction; runningChannel: UpdateChannel } {
   const runningChannel = channelFromVersion(opts.current);
-  if (!opts.latestOnChannel) return { action: 'none', runningChannel };
+  if (!opts.latestOnChannel) return { action: "none", runningChannel };
   const cmp = compareVersions(opts.latestOnChannel, opts.current);
   // Same version on this track: not a switch, even if compose still pins the other tag.
-  if (cmp === 0) return { action: 'none', runningChannel };
+  if (cmp === 0) return { action: "none", runningChannel };
   if (runningChannel !== opts.channel) {
-    return { action: cmp < 0 ? 'downgrade' : 'switch', runningChannel };
+    return { action: cmp < 0 ? "downgrade" : "switch", runningChannel };
   }
-  if (cmp > 0) return { action: 'update', runningChannel };
-  return { action: 'none', runningChannel };
+  if (cmp > 0) return { action: "update", runningChannel };
+  return { action: "none", runningChannel };
 }
 
 export function imageTagFromRef(ref: string): string {
   const trimmed = ref.trim();
-  const slash = trimmed.lastIndexOf('/');
-  const colon = trimmed.lastIndexOf(':');
+  const slash = trimmed.lastIndexOf("/");
+  const colon = trimmed.lastIndexOf(":");
   if (colon > slash && colon !== -1) return trimmed.slice(colon + 1);
   return DOCKER_UPDATE.STABLE_TAG;
 }
@@ -132,18 +148,25 @@ export function runningImageRef(): string {
   return `${APP.GHCR_REGISTRY}/${APP.GITHUB_REPO}:${channelImageTag(channelFromVersion(VERSION))}`;
 }
 
-function parseVersion(raw: string): { core: number[]; pre: Array<string | number> } {
-  const t = raw.trim().replace(/^v/i, '');
-  const [corePart, ...preParts] = t.split('-');
-  const core = corePart.split('.').map((n) => {
+function parseVersion(raw: string): {
+  core: number[];
+  pre: Array<string | number>;
+} {
+  const t = raw.trim().replace(/^v/i, "");
+  const [corePart, ...preParts] = t.split("-");
+  const core = corePart.split(".").map((n) => {
     const v = Number(n);
     return Number.isFinite(v) ? v : 0;
   });
   while (core.length < 3) core.push(0);
-  const pre = preParts.join('-').split('.').filter(Boolean).map((p) => {
-    const n = Number(p);
-    return Number.isFinite(n) && String(n) === p ? n : p;
-  });
+  const pre = preParts
+    .join("-")
+    .split(".")
+    .filter(Boolean)
+    .map((p) => {
+      const n = Number(p);
+      return Number.isFinite(n) && String(n) === p ? n : p;
+    });
   return { core: core.slice(0, 3), pre };
 }
 
@@ -163,7 +186,7 @@ export function compareVersions(a: string, b: string): number {
     const bv = pb.pre[i];
     if (av === undefined) return -1;
     if (bv === undefined) return 1;
-    if (typeof av === 'number' && typeof bv === 'number') {
+    if (typeof av === "number" && typeof bv === "number") {
       if (av !== bv) return av - bv;
       continue;
     }
@@ -181,29 +204,30 @@ function applyHint(opts: {
   imageTag: string;
   channelTag: string;
   runningChannel: UpdateChannel;
+  gitOk: boolean;
 }): string | null {
-  const { cfg, action, latest, channelTag, runningChannel } = opts;
+  const { cfg, action, latest, channelTag, runningChannel, gitOk } = opts;
   const target = targetImageRef(cfg.repository, cfg.channel);
   const bits: string[] = [];
-  if (action === 'downgrade') {
+  if (action === "downgrade") {
     bits.push(
       `Stable/main is ${latest}, you are on ${VERSION} (${runningChannel}). ` +
-      'That is a downgrade: config.yaml, the vault, and Settings may not load on the older build.',
+        "That is a downgrade: config.yaml, the vault, and Settings may not load on the older build.",
     );
-  } else if (action === 'switch') {
+  } else if (action === "switch") {
     bits.push(
       `Switch from the ${runningChannel} image to ${cfg.channel} (${latest ?? channelTag}). ` +
-      `Set LUMO_TAMER_IMAGE=${target} in .env so the next compose up does not roll back.`,
+        `Set LUMO_TAMER_IMAGE=${target} in .env so the next compose up does not roll back.`,
     );
   }
-  if (!dockerSocketAvailable(cfg.dockerSocket)) {
+  if (!dockerSocketAvailable(cfg.dockerSocket) && !gitOk) {
     bits.push(
       `This container has no Docker socket at ${cfg.dockerSocket}. ` +
-      `Bind-mount it (see docker-compose.yml) to apply from this page, ` +
-      `or on the host: docker pull ${target} && docker compose up -d tamer`,
+        `Bind-mount it (see docker-compose.yml) to apply from this page, ` +
+        `or on the host: docker pull ${target} && docker compose up -d tamer`,
     );
   }
-  return bits.length ? bits.join(' ') : null;
+  return bits.length ? bits.join(" ") : null;
 }
 
 export function emptyStatus(error: string | null = null): UpdateStatus {
@@ -218,8 +242,8 @@ export function emptyStatus(error: string | null = null): UpdateStatus {
       latest: null,
       latestUrl: null,
       available: false,
-      action: 'none',
-      channel: 'stable',
+      action: "none",
+      channel: "stable",
       runningChannel: channelFromVersion(VERSION),
       repository: APP.GITHUB_REPO,
       imageTag,
@@ -238,7 +262,7 @@ export function emptyStatus(error: string | null = null): UpdateStatus {
     latest: null,
     latestUrl: null,
     available: false,
-    action: 'none',
+    action: "none",
     channel: cfg.channel,
     runningChannel: channelFromVersion(VERSION),
     repository: cfg.repository,
@@ -260,22 +284,32 @@ function githubAuthHeaders(): Record<string, string> {
     // config not loaded — env fallback still applies
   }
   token ??= process.env.GITHUB_TOKEN;
-  return token && token.trim() ? { Authorization: `Bearer ${token.trim()}` } : {};
+  return token && token.trim()
+    ? { Authorization: `Bearer ${token.trim()}` }
+    : {};
 }
 
 export async function fetchBranchVersion(
   repository: string,
-  branch: 'main' | 'dev',
+  branch: "main" | "dev",
   fetcher: typeof fetch = fetch,
 ): Promise<string | null> {
   const repo = parseRepository(repository);
-  const res = await fetcher(`https://raw.githubusercontent.com/${repo}/${branch}/package.json`, {
-    headers: { 'User-Agent': `${APP.NAME}/${VERSION}`, ...githubAuthHeaders() },
-  });
+  const res = await fetcher(
+    `https://raw.githubusercontent.com/${repo}/${branch}/package.json`,
+    {
+      headers: {
+        "User-Agent": `${APP.NAME}/${VERSION}`,
+        ...githubAuthHeaders(),
+      },
+    },
+  );
   if (!res.ok) return null;
   try {
-    const pkg = await res.json() as { version?: unknown };
-    return typeof pkg.version === 'string' && pkg.version.trim() ? pkg.version.trim() : null;
+    const pkg = (await res.json()) as { version?: unknown };
+    return typeof pkg.version === "string" && pkg.version.trim()
+      ? pkg.version.trim()
+      : null;
   } catch {
     return null;
   }
@@ -291,22 +325,27 @@ export async function fetchGithubReleases(
     {
       headers: {
         Accept: GITHUB.ACCEPT,
-        'User-Agent': `${APP.NAME}/${VERSION}`,
-        'X-GitHub-Api-Version': GITHUB.API_VERSION,
+        "User-Agent": `${APP.NAME}/${VERSION}`,
+        "X-GitHub-Api-Version": GITHUB.API_VERSION,
         ...githubAuthHeaders(),
       },
     },
   );
   if (!res.ok) {
-    const body = await res.text().catch(() => '');
-    throw new Error(`GitHub releases ${res.status}${body ? `: ${body.slice(0, 120)}` : ''}`);
+    const body = await res.text().catch(() => "");
+    throw new Error(
+      `GitHub releases ${res.status}${body ? `: ${body.slice(0, 120)}` : ""}`,
+    );
   }
-  const data = await res.json() as GithubRelease[];
-  if (!Array.isArray(data)) throw new Error('GitHub releases response was not a list');
+  const data = (await res.json()) as GithubRelease[];
+  if (!Array.isArray(data))
+    throw new Error("GitHub releases response was not a list");
   return data;
 }
 
-export async function checkForUpdate(fetcher: typeof fetch = fetch): Promise<UpdateStatus> {
+export async function checkForUpdate(
+  fetcher: typeof fetch = fetch,
+): Promise<UpdateStatus> {
   const cfg = getUpdatesConfig();
   const base = emptyStatus();
   if (!cfg.enabled) {
@@ -316,13 +355,18 @@ export async function checkForUpdate(fetcher: typeof fetch = fetch): Promise<Upd
   try {
     const repo = parseRepository(cfg.repository);
     const releases = await fetchGithubReleases(cfg.repository, fetcher);
+    const gitOk = await isGitUpdateable();
     const picked = pickRelease(releases, cfg.channel);
-    let latest = picked ? picked.tag_name.replace(/^v/i, '') : null;
+    let latest = picked ? picked.tag_name.replace(/^v/i, "") : null;
     let latestUrl = picked?.html_url ?? null;
     if (!latest) {
       const branch = githubBranchForChannel(cfg.channel);
       const branchVer = await fetchBranchVersion(repo, branch, fetcher);
-      if (branchVer && cfg.channel === 'stable' && channelFromVersion(branchVer) === 'dev') {
+      if (
+        branchVer &&
+        cfg.channel === "stable" &&
+        channelFromVersion(branchVer) === "dev"
+      ) {
         latest = null;
       } else if (branchVer) {
         latest = branchVer;
@@ -336,9 +380,9 @@ export async function checkForUpdate(fetcher: typeof fetch = fetch): Promise<Upd
       latestOnChannel: latest,
     });
     const noTrack = !latest
-      ? (cfg.channel === 'stable'
-        ? 'No stable/main release yet (main is still a dev build). This channel will not follow -dev tags.'
-        : 'No GitHub releases found for this repository.')
+      ? cfg.channel === "stable"
+        ? "No stable/main release yet (main is still a dev build). This channel will not follow -dev tags."
+        : "No GitHub releases found for this repository."
       : null;
     const hint = applyHint({
       cfg,
@@ -347,9 +391,11 @@ export async function checkForUpdate(fetcher: typeof fetch = fetch): Promise<Upd
       imageTag: base.imageTag,
       channelTag: base.channelTag,
       runningChannel: classified.runningChannel,
+      gitOk,
     });
-    const available = classified.action !== 'none';
+    const available = classified.action !== "none";
     const sockOk = await dockerEngineReachable(cfg.dockerSocket);
+    const applyCapable = sockOk || gitOk;
     cached = {
       ...base,
       repository: repo,
@@ -360,19 +406,46 @@ export async function checkForUpdate(fetcher: typeof fetch = fetch): Promise<Upd
       runningChannel: classified.runningChannel,
       checkedAt: new Date().toISOString(),
       error: noTrack,
-      canApply: available && sockOk,
+      canApply: available && applyCapable,
       applyHint: hint,
     };
     return cached;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    cached = { ...base, checkedAt: new Date().toISOString(), error: message, canApply: false };
+    cached = {
+      ...base,
+      checkedAt: new Date().toISOString(),
+      error: message,
+      canApply: false,
+    };
     return cached;
   }
 }
 
 export function getCachedUpdateStatus(): UpdateStatus {
   return cached ?? emptyStatus();
+}
+
+/** Set by the API server; lets bare git checkouts restart after applying. */
+let restartHook: (() => void) | null = null;
+
+export function setGitRestartHook(hook: () => void): void {
+  restartHook = hook;
+}
+
+/**
+ * Restart shortly after a checkout so the HTTP response flushes first.
+ * Without a hook we keep serving; the staleness chain catches up on the
+ * next manual restart.
+ */
+function scheduleRestartAfterGitUpdate(): void {
+  if (!restartHook) {
+    logger.warn(
+      "Git update applied but no restart hook registered — serving old code until the next restart.",
+    );
+    return;
+  }
+  setTimeout(() => restartHook?.(), 250);
 }
 
 export async function applyUpdate(
@@ -384,37 +457,75 @@ export async function applyUpdate(
   message: string;
 }> {
   if (applying) {
-    return { ok: false, status: getCachedUpdateStatus(), message: 'An update is already running.' };
+    return {
+      ok: false,
+      status: getCachedUpdateStatus(),
+      message: "An update is already running.",
+    };
   }
   const status = cached?.checkedAt ? cached : await checkForUpdate(fetcher);
   if (!force && !status.available) {
-    return { ok: false, status, message: status.error || 'Already up to date.' };
+    return {
+      ok: false,
+      status,
+      message: status.error || "Already up to date.",
+    };
   }
   if (!force && !status.canApply) {
-    return { ok: false, status, message: status.applyHint || 'Cannot apply this update from here.' };
+    return {
+      ok: false,
+      status,
+      message: status.applyHint || "Cannot apply this update from here.",
+    };
   }
   const cfg = getUpdatesConfig();
   applying = true;
   try {
-    if (force && !dockerSocketAvailable(cfg.dockerSocket)) {
+    if (!dockerSocketAvailable(cfg.dockerSocket)) {
+      if (!(await isGitUpdateable())) {
+        return {
+          ok: false,
+          status,
+          message: force
+            ? `Force-update needs the Docker socket at ${cfg.dockerSocket}; there is nothing to force-check-out from git.`
+            : `No Docker socket (${cfg.dockerSocket}) and no clean git checkout available. ` +
+              "Bind-mount the socket (see docker-compose.yml), or update the checkout via git/rsync and restart.",
+        };
+      }
+      if (!status.latest) {
+        return { ok: false, status, message: "No release tag to check out." };
+      }
+      const tag = `v${status.latest.replace(/^v/i, "")}`;
+      logger.info({ tag }, "Applying git self-update");
+      await applyGitUpdate(tag);
+      scheduleRestartAfterGitUpdate();
       return {
-        ok: false,
+        ok: true,
         status,
-        message: `This container has no Docker socket at ${cfg.dockerSocket}. Bind-mount it (see docker-compose.yml) to force-update from here.`,
+        message: `Checked out ${tag}. Restarting to rebuild and serve the new version.`,
       };
     }
     const imageRef = targetImageRef(cfg.repository, cfg.channel);
     const name = process.env.LUMO_CONTAINER_NAME || APP.CONTAINER_NAME;
-    logger.info({
-      imageRef, name, latest: status.latest, action: status.action,
-    }, 'Applying Docker self-update');
+    logger.info(
+      {
+        imageRef,
+        name,
+        latest: status.latest,
+        action: status.action,
+      },
+      "Applying Docker self-update",
+    );
     await pullAndSpawnHelper(cfg.dockerSocket, name, imageRef);
     const envHint = ` Set LUMO_TAMER_IMAGE=${imageRef} in .env so compose does not roll back.`;
     return {
       ok: true,
       status,
-      message: `${force ? 'Force-pulled' : 'Pulled'} ${imageRef} (${status.latest ?? 'current channel'}). Recreating this container.`
-        + (status.action === 'switch' || status.action === 'downgrade' ? envHint : ''),
+      message:
+        `${force ? "Force-pulled" : "Pulled"} ${imageRef} (${status.latest ?? "current channel"}). Recreating this container.` +
+        (status.action === "switch" || status.action === "downgrade"
+          ? envHint
+          : ""),
     };
   } finally {
     applying = false;
@@ -443,26 +554,36 @@ export function startUpdateChecker(): void {
     try {
       const status = await checkForUpdate();
       if (status.available) {
-        logger.info({
-          current: status.current,
-          latest: status.latest,
-          channel: status.channel,
-        }, 'Update available');
+        logger.info(
+          {
+            current: status.current,
+            latest: status.latest,
+            channel: status.channel,
+          },
+          "Update available",
+        );
       }
-      if (applyIfDue && cfg.autoApply && status.action === 'update' && status.canApply) {
+      if (
+        applyIfDue &&
+        cfg.autoApply &&
+        status.action === "update" &&
+        status.canApply
+      ) {
         const result = await applyUpdate();
-        logger.info({ message: result.message }, 'Auto-apply started');
+        logger.info({ message: result.message }, "Auto-apply started");
       } else if (status.error) {
-        logger.warn({ error: status.error }, 'Update check failed');
+        logger.warn({ error: status.error }, "Update check failed");
       }
     } catch (error) {
-      logger.warn({ error }, 'Update check failed');
+      logger.warn({ error }, "Update check failed");
     }
   };
 
   void run(false);
   const ms = Math.max(1, cfg.checkIntervalHours) * 60 * 60 * 1000;
-  checker = setInterval(() => { void run(true); }, ms);
+  checker = setInterval(() => {
+    void run(true);
+  }, ms);
   checker.unref();
 }
 

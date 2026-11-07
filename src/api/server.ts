@@ -1,31 +1,42 @@
-import { spawn } from 'child_process';
-import type { Server } from 'http';
-import { readFileSync, utimesSync, watch } from 'fs';
-import express from 'express';
-import { parseDocument } from 'yaml';
-import { getServerConfig, getMetricsConfig, authConfig, reloadConfig, parseServerUserConfig } from '../app/config.js';
-import { isContainerEnv } from '../app/env.js';
-import { resolveDataPath, PROJECT_ROOT } from '../app/paths.js';
-import { isInstallStale, isBuildStale } from '../app/staleness.js';
-import { getConfigPath } from '../app/config-file.js';
-import { logger } from '../app/logger.js';
-import { setupAuthMiddleware, setupLoggingMiddleware, setupMetricsMiddleware, setupReadyMiddleware } from './middleware.js';
-import { setupApiErrorHandler } from './error-handler.js';
-import { createHealthRouter } from './routes/health.js';
-import { createModelsRouter } from './routes/models.js';
-import { createChatCompletionsRouter } from './routes/chat-completions/index.js';
-import { createResponsesRouter } from './routes/responses/index.js';
-import { createAuthRouter } from './routes/auth.js';
-import { createConfigRouter } from './routes/config.js';
-import { createUpdatesRouter } from './routes/updates.js';
-import { createLogsRouter } from './routes/logs.js';
-import { startUpdateChecker } from '../app/updates.js';
-import { EndpointDependencies } from './types.js';
-import { RequestQueue } from './queue.js';
-import { initMetrics, type MetricsService } from '../app/metrics.js';
-import { createMetricsRouter } from './routes/metrics.js';
-import type { Application } from '../app/index.js';
-import { VERSION } from '../app/version.js';
+import { spawn } from "child_process";
+import type { Server } from "http";
+import { readFileSync, utimesSync, watch } from "fs";
+import express from "express";
+import { parseDocument } from "yaml";
+import {
+  getServerConfig,
+  getMetricsConfig,
+  authConfig,
+  reloadConfig,
+  parseServerUserConfig,
+} from "../app/config.js";
+import { isContainerEnv } from "../app/env.js";
+import { resolveDataPath, PROJECT_ROOT } from "../app/paths.js";
+import { isInstallStale, isBuildStale } from "../app/staleness.js";
+import { getConfigPath } from "../app/config-file.js";
+import { logger } from "../app/logger.js";
+import {
+  setupAuthMiddleware,
+  setupLoggingMiddleware,
+  setupMetricsMiddleware,
+  setupReadyMiddleware,
+} from "./middleware.js";
+import { setupApiErrorHandler } from "./error-handler.js";
+import { createHealthRouter } from "./routes/health.js";
+import { createModelsRouter } from "./routes/models.js";
+import { createChatCompletionsRouter } from "./routes/chat-completions/index.js";
+import { createResponsesRouter } from "./routes/responses/index.js";
+import { createAuthRouter } from "./routes/auth.js";
+import { createConfigRouter } from "./routes/config.js";
+import { createUpdatesRouter } from "./routes/updates.js";
+import { createLogsRouter } from "./routes/logs.js";
+import { setGitRestartHook, startUpdateChecker } from "../app/updates.js";
+import { EndpointDependencies } from "./types.js";
+import { RequestQueue } from "./queue.js";
+import { initMetrics, type MetricsService } from "../app/metrics.js";
+import { createMetricsRouter } from "./routes/metrics.js";
+import type { Application } from "../app/index.js";
+import { VERSION } from "../app/version.js";
 
 export class APIServer {
   private expressApp: express.Application;
@@ -44,7 +55,7 @@ export class APIServer {
     this.deps = this.buildDependencies();
     this.app.setOnSessionInvalid(() => {
       this.refreshAuthBindings();
-      logger.warn('Session invalidated; waiting for /auth re-login');
+      logger.warn("Session invalidated; waiting for /auth re-login");
     });
     this.setupMiddleware();
     this.setupRoutes();
@@ -74,26 +85,31 @@ export class APIServer {
     this.expressApp.use(createModelsRouter());
     this.expressApp.use(createChatCompletionsRouter(this.deps));
     this.expressApp.use(createResponsesRouter(this.deps));
-    this.expressApp.use(createAuthRouter(this.deps, {
-      onAuthenticated: async () => {
-        await this.app.applyVaultAuth();
-        this.refreshAuthBindings();
-        logger.info('Auth vault loaded into the running server');
-      },
-      onLoggedOut: () => {
-        this.app.clearAuth();
-        this.refreshAuthBindings();
-        logger.info('Signed out; waiting for /auth');
-      },
-      getSessionNotice: () => this.app.getSessionNotice(),
-    }));
+    this.expressApp.use(
+      createAuthRouter(this.deps, {
+        onAuthenticated: async () => {
+          await this.app.applyVaultAuth();
+          this.refreshAuthBindings();
+          logger.info("Auth vault loaded into the running server");
+        },
+        onLoggedOut: () => {
+          this.app.clearAuth();
+          this.refreshAuthBindings();
+          logger.info("Signed out; waiting for /auth");
+        },
+        getSessionNotice: () => this.app.getSessionNotice(),
+      }),
+    );
     this.expressApp.use(createUpdatesRouter());
+    setGitRestartHook(() => restartAfterConfigSave(this.httpServer));
     this.expressApp.use(createLogsRouter());
-    this.expressApp.use(createConfigRouter(this.app, {
-      onSaved: () => {
-        restartAfterConfigSave(this.httpServer);
-      },
-    }));
+    this.expressApp.use(
+      createConfigRouter(this.app, {
+        onSaved: () => {
+          restartAfterConfigSave(this.httpServer);
+        },
+      }),
+    );
 
     this.expressApp.use(setupApiErrorHandler());
   }
@@ -103,7 +119,9 @@ export class APIServer {
 
     return {
       queue: this.queue,
-      lumoClient: this.app.isAuthenticated() ? this.app.getLumoClient() : undefined,
+      lumoClient: this.app.isAuthenticated()
+        ? this.app.getLumoClient()
+        : undefined,
       conversationStore: this.app.getConversationStore(),
       syncInitialized: this.app.isSyncInitialized(),
       authManager: this.app.getAuthManager(),
@@ -113,21 +131,29 @@ export class APIServer {
   }
 
   async start(): Promise<void> {
-    const { validateTemplateOnce } = await import('./instructions.js');
+    const { validateTemplateOnce } = await import("./instructions.js");
     validateTemplateOnce(this.serverConfig.instructions.template);
 
     return new Promise((resolve) => {
       this.httpServer = this.expressApp.listen(this.serverConfig.port, () => {
-        logger.info('========================================');
+        logger.info("========================================");
         logger.info(`lumo-tamer v${VERSION} is ready!`);
-        logger.info(`  base_url: http://localhost:${this.serverConfig.port}/v1`);
-        logger.info(`  auth:     http://localhost:${this.serverConfig.port}/auth`);
-        logger.info(`  config:   http://localhost:${this.serverConfig.port}/config`);
-        logger.info(`  api_key:  ${this.serverConfig.apiKey.substring(0, 3)}...`);
+        logger.info(
+          `  base_url: http://localhost:${this.serverConfig.port}/v1`,
+        );
+        logger.info(
+          `  auth:     http://localhost:${this.serverConfig.port}/auth`,
+        );
+        logger.info(
+          `  config:   http://localhost:${this.serverConfig.port}/config`,
+        );
+        logger.info(
+          `  api_key:  ${this.serverConfig.apiKey.substring(0, 3)}...`,
+        );
         if (!this.app.isAuthenticated()) {
-          logger.warn('Not logged in yet. Open /auth and sign in to Proton.');
+          logger.warn("Not logged in yet. Open /auth and sign in to Proton.");
         }
-        logger.info('========================================\n');
+        logger.info("========================================\n");
         startUpdateChecker();
         watchConfigForReload();
         resolve();
@@ -149,27 +175,32 @@ function watchConfigForReload(): void {
       timer = setTimeout(() => {
         try {
           const before = getServerConfig();
-          const doc = parseDocument(readFileSync(getConfigPath(), 'utf8'));
+          const doc = parseDocument(readFileSync(getConfigPath(), "utf8"));
           if (doc.errors.length > 0) throw new Error(doc.errors[0].message);
           parseServerUserConfig((doc.toJS() ?? {}) as Record<string, unknown>);
           reloadConfig();
           const after = getServerConfig();
-          logger.info('config.yaml changed — hot-reloaded');
-          if (before.port !== after.port) logger.warn('server.port changed — needs restart');
-          if (before.apiKey !== after.apiKey) logger.warn('server.apiKey changed — needs restart');
+          logger.info("config.yaml changed — hot-reloaded");
+          if (before.port !== after.port)
+            logger.warn("server.port changed — needs restart");
+          if (before.apiKey !== after.apiKey)
+            logger.warn("server.apiKey changed — needs restart");
         } catch (err) {
-          logger.warn({ err }, 'config.yaml changed but invalid — keeping current config');
+          logger.warn(
+            { err },
+            "config.yaml changed but invalid — keeping current config",
+          );
         }
       }, 250);
     });
   } catch (err) {
-    logger.debug({ err }, 'config.yaml not watchable');
+    logger.debug({ err }, "config.yaml not watchable");
   }
 }
 
 /** Docker/k8s restart the PID. Local `tsx watch` only restarts on file changes. */
 function restartAfterConfigSave(httpServer?: Server): void {
-  logger.info('Restart triggered — shutting down...');
+  logger.info("Restart triggered — shutting down...");
   if (isContainerEnv()) {
     process.exit(0);
   }
@@ -177,14 +208,14 @@ function restartAfterConfigSave(httpServer?: Server): void {
     try {
       const entry = process.argv[1];
       if (entry) utimesSync(entry, new Date(), new Date());
-      logger.info('Poked tsx watch — waiting for restart');
+      logger.info("Poked tsx watch — waiting for restart");
     } catch (err) {
-      logger.warn({ err }, 'Could not poke tsx watch, respawning');
+      logger.warn({ err }, "Could not poke tsx watch, respawning");
       respawnSelf();
     }
     process.exit(0);
   }
-  logger.info('Not in Docker/tsx-watch — respawning self');
+  logger.info("Not in Docker/tsx-watch — respawning self");
   if (!httpServer) {
     respawnSelf();
     process.exit(0);
@@ -196,15 +227,19 @@ function restartAfterConfigSave(httpServer?: Server): void {
     respawnSelf();
     process.exit(0);
   };
-  try { httpServer.closeAllConnections(); } catch { /* pre-18.2 Node */ }
+  try {
+    httpServer.closeAllConnections();
+  } catch {
+    /* pre-18.2 Node */
+  }
   httpServer.close(respawn);
   setTimeout(respawn, 2000).unref();
 }
 
 function parentIsTsxWatch(): boolean {
   try {
-    const cmd = readFileSync(`/proc/${process.ppid}/cmdline`, 'utf8');
-    return cmd.includes('tsx') && cmd.includes('watch');
+    const cmd = readFileSync(`/proc/${process.ppid}/cmdline`, "utf8");
+    return cmd.includes("tsx") && cmd.includes("watch");
   } catch {
     return false;
   }
@@ -213,19 +248,19 @@ function parentIsTsxWatch(): boolean {
 function respawnSelf(): void {
   const args = [
     ...process.execArgv,
-    ...process.argv.slice(1).filter((arg) => arg !== 'watch'),
+    ...process.argv.slice(1).filter((arg) => arg !== "watch"),
   ];
   const spawnDirect = (): void => {
     const child = spawn(process.execPath, args, {
       detached: true,
-      stdio: 'inherit',
+      stdio: "inherit",
       env: process.env,
     });
     child.unref();
   };
 
   // tsx dev runs from src/ — nothing to rebuild, respawn as-is.
-  const runFromDist = /(?:^|[\\/])dist[\\/]/.test(process.argv[1] ?? '');
+  const runFromDist = /(?:^|[\\/])dist[\\/]/.test(process.argv[1] ?? "");
   if (!runFromDist) {
     spawnDirect();
     return;
@@ -234,25 +269,32 @@ function respawnSelf(): void {
   // rsync-style deploys sync src/ but not dist/. Without this chain the
   // restart button would happily restart the previous build forever.
   const pre: string[] = [];
-  if (isInstallStale(PROJECT_ROOT)) pre.push('npm install --no-audit --no-fund');
-  if (isBuildStale(PROJECT_ROOT)) pre.push('npm run build');
+  if (isInstallStale(PROJECT_ROOT))
+    pre.push("npm install --no-audit --no-fund");
+  if (isBuildStale(PROJECT_ROOT)) pre.push("npm run build");
   if (pre.length === 0) {
     spawnDirect();
     return;
   }
 
-  logger.info({ steps: pre }, 'Source changed since the last build — rebuilding before respawn');
-  const command = [...pre, `exec ${[process.execPath, ...args].map(shellQuote).join(' ')}`].join(' && ');
+  logger.info(
+    { steps: pre },
+    "Source changed since the last build — rebuilding before respawn",
+  );
+  const command = [
+    ...pre,
+    `exec ${[process.execPath, ...args].map(shellQuote).join(" ")}`,
+  ].join(" && ");
   try {
-    const child = spawn('/bin/sh', ['-c', command], {
+    const child = spawn("/bin/sh", ["-c", command], {
       detached: true,
-      stdio: 'inherit',
+      stdio: "inherit",
       cwd: PROJECT_ROOT,
       env: process.env,
     });
     child.unref();
   } catch (err) {
-    logger.warn({ err }, 'Chained respawn failed — starting without rebuild');
+    logger.warn({ err }, "Chained respawn failed — starting without rebuild");
     spawnDirect();
   }
 }
