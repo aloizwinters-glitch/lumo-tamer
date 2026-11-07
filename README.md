@@ -213,18 +213,16 @@ cli:
 
 ### Images
 
-Lumo can generate, edit and describe images. Enable the native image tools:
+Lumo can generate, edit and describe images. Enable the native image tools (off by default; uses your Lumo image allowance):
 
 ```yaml
 server:
   enableImageTools: true
-  images:
-    maxInputBytes: "4mb"
-  bodyLimit: "5mb"    # inbound image_url payloads count against this
+  bodyLimit: "10mb"   # images travel base64-encoded; follow-ups resend them
 ```
 
 Inbound (vision): OpenAI `image_url` / `input_image` parts with base64 `data:` URLs (jpeg, png, gif, webp) are forwarded as Lumo images. With encryption on (the default), image bytes are U2L-encrypted with the per-request key exactly like the web client; plaintext images are never sent. Remote http(s) URLs are not fetched (no SSRF from the proxy). Like the web client, only the 10 most recent images of a conversation are sent. Images are not persisted or synced. Raise `server.bodyLimit` (default `1mb`) for large screenshots.  
-Outbound: generated images are streamed as markdown data URLs (`![lumo:<id>](data:image/png;base64,...)`). The `lumo:<id>` alt text is the Proton image id, so a later `edit_image` / `describe_image` can find it.
+Outbound: generated images are streamed as markdown data URLs (`![lumo:<id>](data:image/jpeg;base64,...)`), decrypted in the proxy with the per-request key. The `lumo:<id>` alt text is the Proton image id: when the client sends that assistant message back, the proxy replays it like the web client (a `<lumo-image source="assistant">` marker plus the encrypted bytes), so a later `edit_image` / `describe_image` can find it. The stored conversation keeps only the marker, not the bytes.
 
 ### Web Search
 

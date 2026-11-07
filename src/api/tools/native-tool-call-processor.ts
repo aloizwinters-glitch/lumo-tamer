@@ -21,6 +21,7 @@ import type { ParsedToolCall } from './types.js';
 
 const KNOWN_NATIVE_TOOLS = new Set([
   'proton_info', 'web_search', 'weather', 'stock', 'cryptocurrency',
+  'generate_image', 'edit_image', 'describe_image',
 ]);
 
 // ── Internal helpers ─────────────────────────────────────────────────

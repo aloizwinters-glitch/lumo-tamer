@@ -21,9 +21,28 @@ describe('image input', () => {
       },
     ]);
     expect(turns).toHaveLength(1);
-    expect(turns[0].content).toBe('Describe this');
     expect(turns[0].images).toHaveLength(1);
-    expect(turns[0].images![0]).toMatchObject({ encrypted: false, data: '/9j/AAAA' });
+    const img = turns[0].images![0];
+    expect(img).toMatchObject({ encrypted: false, data: '/9j/AAAA' });
+    expect(turns[0].content).toBe(`Describe this\n<lumo-image id="${img.image_id}" source="user" />`);
+  });
+
+  it('gives the same image the same id across requests (stable history)', async () => {
+    const msg = { role: 'user' as const, content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } }] };
+    const [a] = await convertOpenAIChatMessages([msg]);
+    const [b] = await convertOpenAIChatMessages([msg]);
+    expect(a.images![0].image_id).toBe(b.images![0].image_id);
+    expect(a.content).toBe(b.content);
+  });
+
+  it('replays generated images from assistant markdown as Lumo images', async () => {
+    const turns = await convertOpenAIChatMessages([
+      { role: 'user', content: 'Draw a cat' },
+      { role: 'assistant', content: 'Here you go:\n\n![lumo:img-123](data:image/png;base64,iVBORw0KGgoAAAA)\n\n' },
+      { role: 'user', content: 'Make it blue' },
+    ]);
+    expect(turns[1].content).toBe('Here you go:\n\n<lumo-image id="img-123" source="assistant" />');
+    expect(turns[1].images).toEqual([{ encrypted: false, image_id: 'img-123', data: 'iVBORw0KGgoAAAA' }]);
   });
 
   it('notes unsupported images instead of failing', async () => {
@@ -51,7 +70,7 @@ describe('image input', () => {
       } as never,
     ]);
     expect(turns[0].images).toHaveLength(1);
-    expect(turns[0].content).toBe('What is it?');
+    expect(turns[0].content).toMatch(/^What is it\?\n<lumo-image id="[0-9a-f-]{36}" source="user" \/>$/);
   });
 });
 

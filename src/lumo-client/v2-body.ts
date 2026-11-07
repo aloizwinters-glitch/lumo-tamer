@@ -14,6 +14,7 @@
 
 import { Role, type Turn, type ToolName, type LumoModelTier } from './types.js';
 import type { WireImage } from '@lumo/types-api.js';
+import { inferImageMimeType } from './images.js';
 
 export type { LumoModelTier };
 
@@ -90,19 +91,6 @@ export interface ChatCompletionsMessage {
     role: string;
     content: string | ChatCompletionsContentPart[];
     encrypted?: true;
-}
-
-/**
- * Infer an image's MIME type from the magic bytes at the start of its base64
- * payload (WireImage carries no MIME type). Mirrors upstream; falls back to png.
- */
-function inferImageMimeType(base64: string): string {
-    if (base64.startsWith('iVBORw0KGgo')) return 'image/png';
-    if (base64.startsWith('/9j/')) return 'image/jpeg';
-    if (base64.startsWith('R0lGOD')) return 'image/gif';
-    if (base64.startsWith('UklGR')) return 'image/webp';
-    if (base64.startsWith('Qk')) return 'image/bmp';
-    return 'image/png';
 }
 
 /**

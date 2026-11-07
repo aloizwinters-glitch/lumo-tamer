@@ -181,6 +181,7 @@ const sharedMergedFields = {
   commands: commandsConfigSchema,
   updates: updatesConfigSchema,
   enableWebSearch: z.boolean(),
+  enableImageTools: z.boolean(),
 };
 
 const serverMergedConfigSchema = z.object({
@@ -344,6 +345,7 @@ export const getConversationsConfig = () => getConfig().conversations;
 export const getCommandsConfig = () => getConfig().commands;
 export const getUpdatesConfig = () => getConfig().updates;
 export const getEnableWebSearch = () => getConfig().enableWebSearch;
+export const getEnableImageTools = () => getConfig().enableImageTools;
 export type UpdatesConfig = z.infer<typeof updatesConfigSchema>;
 
 // Server-specific getters

@@ -6,7 +6,7 @@
  * detects native tool calls, and bounces misrouted custom tools.
  */
 
-import { decryptString } from '@lumo/crypto/index.js';
+import { decryptString, decryptUint8Array } from '@lumo/crypto/index.js';
 import {
     DEFAULT_LUMO_PUB_KEY,
     encryptTurns,
@@ -34,13 +34,22 @@ import {
 import { buildChatCompletionsBody, LUMO_CHAT_ENDPOINT, type LumoCompletionTarget } from './v2-body.js';
 import { V2StreamProcessor } from './v2-stream.js';
 import { selectNativeTools } from './native-tools.js';
-import { getInstructionsConfig, getServerInstructionsConfig, getLogConfig, getConfigMode, getCustomToolsConfig, getEnableWebSearch, getServerConfig } from '../app/config.js';
+import { getInstructionsConfig, getServerInstructionsConfig, getLogConfig, getConfigMode, getCustomToolsConfig, getEnableWebSearch, getEnableImageTools, getServerConfig } from '../app/config.js';
 import { isAnnounceWithoutToolCall, isToolCallNarration, isBounceableBlankReply } from '../api/tools/announce.js';
 import { estimatePromptTokens } from '../app/token-estimate.js';
 import { injectInstructionsIntoTurns } from './instructions.js';
 import { NativeToolCallProcessor, type NativeToolCallResult } from '../api/tools/native-tool-call-processor.js';
 import { postProcessTitle } from '@lumo/lib/lumo-api-client/utils.js';
-import { countImages, encryptTurnImages, hasPlaintextImages, limitImages, stripImages } from './images.js';
+import {
+    bytesToBase64,
+    countImages,
+    encryptTurnImages,
+    generatedImageMarkdown,
+    hasPlaintextImages,
+    limitImages,
+    lumoImageMarker,
+    stripImages,
+} from './images.js';
 
 // Re-export types for external consumers
 export type { LumoClientOptions, ChatResult };
@@ -193,6 +202,34 @@ export class LumoClient {
                     const result = await decrypt(msg.content, msg.encrypted);
                     if (result === null) break;
                     nativeToolProcessor.feedToolResult(result);
+                    break;
+                }
+                case 'image_data': {
+                    // Generated/edited image. Encrypted images are AES-GCM ciphertext of the
+                    // raw bytes under the response AD (upstream transforms/decrypt.ts).
+                    let base64: string;
+                    if (msg.encrypted) {
+                        if (!encryptionContext) {
+                            logger.error('Encrypted image without request key; dropping');
+                            break;
+                        }
+                        try {
+                            const adString = `lumo.response.${encryptionContext.requestId}.chunk`;
+                            const bytes = await decryptUint8Array(msg.data, encryptionContext.requestKey, adString);
+                            base64 = bytesToBase64(bytes);
+                        } catch (error) {
+                            logger.error({ error }, 'Failed to decrypt image; dropping');
+                            break;
+                        }
+                    } else {
+                        base64 = msg.data;
+                    }
+                    logger.info({ imageId: msg.image_id, bytes: Math.floor(base64.length * 3 / 4) }, 'Received generated image');
+                    // Client sees markdown with the image; persisted text keeps only Lumo's marker.
+                    content += `\n\n${lumoImageMarker(msg.image_id, 'assistant')}\n\n`;
+                    if (!suppressChunks) {
+                        opts.onChunk?.(generatedImageMarkdown(msg.image_id, base64));
+                    }
                     break;
                 }
                 case 'usage':
@@ -382,6 +419,7 @@ export class LumoClient {
         const tools = selectNativeTools({
             includeInternal: useNativeTools,
             webSearch: getEnableWebSearch(),
+            imageTools: getEnableImageTools(),
         });
 
         // Inject instructions at the last moment (kept out of persisted turns).

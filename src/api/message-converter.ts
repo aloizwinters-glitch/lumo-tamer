@@ -15,7 +15,7 @@ import {
 } from './tools/call-id.js';
 import { type MessageForStore } from 'src/conversations/types.js';
 import type { WireImage } from '@lumo/types-api.js';
-import { parseImageUrl } from '../lumo-client/images.js';
+import { extractGeneratedImages, lumoImageMarker, parseImageUrl } from '../lumo-client/images.js';
 import { logger } from '../app/logger.js';
 
 /**
@@ -197,15 +197,22 @@ export async function convertOpenAIChatMessages(messages: OpenAIChatMessage[]): 
     const text = extractTextContent(rawContent);
     const role = msg.role === 'user' ? Role.User : Role.Assistant;
 
-    // Images are user input only (Lumo vision); assistant images are not replayed.
     if (role === Role.User) {
+      // Like the web client: one <lumo-image source="user"> marker per image, in the
+      // same turn as the bytes (the backend pairs them; edit_image uses the id).
       const { images, notes } = extractImageContent(rawContent);
-      const content = [text, ...notes].filter(Boolean).join('\n');
+      const markers = images.map((im) => lumoImageMarker(im.image_id, 'user'));
+      const content = [text, ...notes, ...markers].filter(Boolean).join('\n');
       result.push(images.length > 0 ? { role, content, images } : { role, content });
       continue;
     }
 
-    result.push({ role, content: text });
+    // Assistant: generated images echoed back as markdown data URLs are replayed
+    // as Lumo images (marker + bytes) so edit_image / describe_image can use them.
+    const generated = extractGeneratedImages(text);
+    result.push(generated.images.length > 0
+      ? { role, content: generated.content, images: generated.images }
+      : { role, content: text });
   }
 
   return result;
