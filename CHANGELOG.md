@@ -1,3 +1,42 @@
+## [0.7.0-dev.16](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.15...v0.7.0-dev.16) (2026-11-07)
+
+### Features
+
+* feat(updates): git self-update for bare checkouts
+
+  A bare node process has no container to recreate, so the Update button
+  was dead outside Docker. On a clean git checkout, Apply now fetches the
+  release tag, checks it out, and restarts; the respawn staleness chain
+  rebuilds install+dist before serving again. Dirty or missing checkouts
+  get an honest hint instead of a silent no-op.
+* feat(web-ui): show the build commit and flag stale dist in /health
+
+  A running process only reports the package version, so a dist rebuilt
+  after start (rsync deploys, manual builds) silently kept serving the
+  old code — which build a slot actually runs was guesswork.
+
+  npm run build now writes build-info.json (git commit, UTC timestamp);
+  /health reports it and flags stale when the process was started before
+  the dist on disk. CI Docker builds embed the real commit; builds without
+  git fall back to unknown.
+
+### Bug Fixes
+
+* fix(tools): open code fences only at line start or before a JSON payload
+
+  The opener regex matched triple backticks anywhere, so a bare inline
+  backtick run in prose flipped the detector into fence state: the
+  following prose was buffered as a fake code body and the next real tool
+  call could be swallowed into that buffer and leaked as text instead of
+  being executed — seen live when replies quoted fence syntax.
+
+  An opener is now valid only at line start (CommonMark, up to three
+  spaces indent) or mid-line as a json tag directly followed by its
+  payload, which covers tool fences emitted right after a colon. A
+  mid-line tag cut at a chunk boundary defers to the next chunk instead
+  of opening speculatively. Non-tool fences re-emit verbatim with their
+  language tag.
+
 ## [0.7.0-dev.15](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.14...v0.7.0-dev.15) (2026-11-06)
 
 ### Bug Fixes
