@@ -43,6 +43,24 @@ export function stripToolPrefix(name: string, prefix: string): string {
   return name.startsWith(prefix) ? name.slice(prefix.length) : name;
 }
 
+/**
+ * Collect unprefixed tool names from a client request's `tools` array.
+ * Accepts both nested `{ function: { name } }` and flat `{ name }` shapes.
+ */
+export function extractClientToolNames(tools?: OpenAITool[]): string[] {
+  if (!tools || tools.length === 0) return [];
+  const names: string[] = [];
+  for (const tool of tools) {
+    if (tool?.function?.name) {
+      names.push(tool.function.name);
+      continue;
+    }
+    const flat = tool as unknown as { name?: string };
+    if (flat?.name) names.push(flat.name);
+  }
+  return names;
+}
+
 // ── Regex helpers ────────────────────────────────────────────────────
 
 /**
@@ -66,8 +84,10 @@ export function applyToolNamePrefix(
 
   let result = text;
   for (const name of toolNames) {
-    // Match tool name at word boundaries, skip if already prefixed
-    const regex = new RegExp(`(?<!${escapeRegex(prefix)})\\b${escapeRegex(name)}\\b`, 'g');
+    // Match tool name at word boundaries, skip if already prefixed.
+    // Also skip matches followed by ':' or '-': property keys (pricing: read)
+    // and compounds (read-only) are prose, not tool references.
+    const regex = new RegExp(`(?<!${escapeRegex(prefix)})\\b${escapeRegex(name)}\\b(?![:-])`, 'g');
     result = result.replace(regex, `${prefix}${name}`);
   }
   return result;

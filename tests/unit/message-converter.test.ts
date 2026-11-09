@@ -9,9 +9,74 @@
 import { describe, it, expect } from 'vitest';
 import { convertOpenAIChatMessages, convertOpenAIResponseMessages, convertToolMessage } from '../../src/api/message-converter.js';
 
+describe('image input', () => {
+  it('extracts image_url parts from user messages', async () => {
+    const turns = await convertOpenAIChatMessages([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Describe this' },
+          { type: 'image_url', image_url: { url: 'data:image/jpeg;base64,/9j/AAAA' } },
+        ],
+      },
+    ]);
+    expect(turns).toHaveLength(1);
+    expect(turns[0].images).toHaveLength(1);
+    const img = turns[0].images![0];
+    expect(img).toMatchObject({ encrypted: false, data: '/9j/AAAA' });
+    expect(turns[0].content).toBe(`Describe this\n<lumo-image id="${img.image_id}" source="user" />`);
+  });
+
+  it('gives the same image the same id across requests (stable history)', async () => {
+    const msg = { role: 'user' as const, content: [{ type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } }] };
+    const [a] = await convertOpenAIChatMessages([msg]);
+    const [b] = await convertOpenAIChatMessages([msg]);
+    expect(a.images![0].image_id).toBe(b.images![0].image_id);
+    expect(a.content).toBe(b.content);
+  });
+
+  it('replays generated images from assistant markdown as Lumo images', async () => {
+    const turns = await convertOpenAIChatMessages([
+      { role: 'user', content: 'Draw a cat' },
+      { role: 'assistant', content: 'Here you go:\n\n![lumo:img-123](data:image/png;base64,iVBORw0KGgoAAAA)\n\n' },
+      { role: 'user', content: 'Make it blue' },
+    ]);
+    expect(turns[1].content).toBe('Here you go:\n\n<lumo-image id="img-123" source="assistant" />');
+    expect(turns[1].images).toEqual([{ encrypted: false, image_id: 'img-123', data: 'iVBORw0KGgoAAAA' }]);
+  });
+
+  it('notes unsupported images instead of failing', async () => {
+    const turns = await convertOpenAIChatMessages([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Look' },
+          { type: 'image_url', image_url: { url: 'https://example.com/x.png' } },
+        ],
+      },
+    ]);
+    expect(turns[0].images).toBeUndefined();
+    expect(turns[0].content).toContain('[Image omitted:');
+  });
+
+  it('extracts Responses API input_image parts', async () => {
+    const turns = await convertOpenAIResponseMessages([
+      {
+        role: 'user',
+        content: [
+          { type: 'input_text', text: 'What is it?' },
+          { type: 'input_image', image_url: 'data:image/png;base64,iVBORw0KGgo=' },
+        ],
+      },
+    ]);
+    expect(turns[0].images).toHaveLength(1);
+    expect(turns[0].content).toMatch(/^What is it\?\n<lumo-image id="[0-9a-f-]{36}" source="user" \/>$/);
+  });
+});
+
 describe('convertOpenAIChatMessages', () => {
-  it('converts user and assistant messages', () => {
-    const turns = convertOpenAIChatMessages([
+  it('converts user and assistant messages', async () => {
+    const turns = await convertOpenAIChatMessages([
       { role: 'user', content: 'Hello' },
       { role: 'assistant', content: 'Hi!' },
     ]);
@@ -23,8 +88,8 @@ describe('convertOpenAIChatMessages', () => {
     expect(turns[1].content).toBe('Hi!');
   });
 
-  it('skips system messages from output', () => {
-    const turns = convertOpenAIChatMessages([
+  it('skips system messages from output', async () => {
+    const turns = await convertOpenAIChatMessages([
       { role: 'system', content: 'Be helpful' },
       { role: 'user', content: 'Hello' },
     ]);
@@ -35,8 +100,8 @@ describe('convertOpenAIChatMessages', () => {
     expect(turns[0].content).toBe('Hello');
   });
 
-  it('returns clean turns without instruction injection', () => {
-    const turns = convertOpenAIChatMessages([
+  it('returns clean turns without instruction injection', async () => {
+    const turns = await convertOpenAIChatMessages([
       { role: 'system', content: 'Be concise' },
       { role: 'user', content: 'Hello' },
     ]);
@@ -46,8 +111,8 @@ describe('convertOpenAIChatMessages', () => {
     expect(turns[0].content).not.toContain('[Project instructions:');
   });
 
-  it('handles multi-turn conversations', () => {
-    const turns = convertOpenAIChatMessages([
+  it('handles multi-turn conversations', async () => {
+    const turns = await convertOpenAIChatMessages([
       { role: 'system', content: 'Be concise' },
       { role: 'user', content: 'First message' },
       { role: 'assistant', content: 'Response' },
@@ -60,8 +125,8 @@ describe('convertOpenAIChatMessages', () => {
     expect(turns[2].content).toBe('Second message');
   });
 
-  it('preserves command messages unchanged', () => {
-    const turns = convertOpenAIChatMessages([
+  it('preserves command messages unchanged', async () => {
+    const turns = await convertOpenAIChatMessages([
       { role: 'system', content: 'Instructions' },
       { role: 'user', content: '/help' },
     ]);
@@ -69,31 +134,32 @@ describe('convertOpenAIChatMessages', () => {
     expect(turns[0].content).toBe('/help');
   });
 
-  it('handles empty messages array', () => {
-    const turns = convertOpenAIChatMessages([]);
+  it('handles empty messages array', async () => {
+    const turns = await convertOpenAIChatMessages([]);
     expect(turns).toEqual([]);
   });
+
 });
 
 describe('convertOpenAIResponseMessages', () => {
-  it('handles string input', () => {
-    const turns = convertOpenAIResponseMessages('Hello');
+  it('handles string input', async () => {
+    const turns = await convertOpenAIResponseMessages('Hello');
 
     expect(turns).toHaveLength(1);
     expect(turns[0].role).toBe('user');
     expect(turns[0].content).toBe('Hello');
   });
 
-  it('returns clean turns for string input (no instruction injection)', () => {
-    const turns = convertOpenAIResponseMessages('Hello', 'Be concise');
+  it('returns clean turns for string input (no instruction injection)', async () => {
+    const turns = await convertOpenAIResponseMessages('Hello', 'Be concise');
 
     expect(turns).toHaveLength(1);
     expect(turns[0].content).toBe('Hello');
     expect(turns[0].content).not.toContain('[Project instructions:');
   });
 
-  it('handles message array input', () => {
-    const turns = convertOpenAIResponseMessages([
+  it('handles message array input', async () => {
+    const turns = await convertOpenAIResponseMessages([
       { role: 'user', content: 'Hello' },
       { role: 'assistant', content: 'Hi!' },
     ]);
@@ -105,8 +171,8 @@ describe('convertOpenAIResponseMessages', () => {
     expect(turns[1].content).toBe('Hi!');
   });
 
-  it('skips system messages from output', () => {
-    const turns = convertOpenAIResponseMessages([
+  it('skips system messages from output', async () => {
+    const turns = await convertOpenAIResponseMessages([
       { role: 'system', content: 'Custom system instructions here' },
       { role: 'user', content: 'Hello' },
     ]);
@@ -116,27 +182,38 @@ describe('convertOpenAIResponseMessages', () => {
     expect(turns[0].content).toBe('Hello');
   });
 
-  it('handles function_call_output items', () => {
-    const turns = convertOpenAIResponseMessages([
+  it('flattens synthetic function_call_output into a user tool-result turn', async () => {
+    const turns = await convertOpenAIResponseMessages([
+      { role: 'user', content: 'Call a tool' },
+      { type: 'function_call_output', call_id: 'read__synth__0123456789abcdef01234567', output: 'file body' } as any,
+    ]);
+
+    expect(turns).toHaveLength(2);
+    expect(turns[1].role).toBe('user');
+    expect(turns[1].content).toBe('[Tool Result: read]\nfile body');
+    expect(turns[1].content).not.toContain('call_id');
+  });
+
+  it('handles function_call_output items', async () => {
+    const turns = await convertOpenAIResponseMessages([
       { role: 'user', content: 'Call a tool' },
       { type: 'function_call_output', call_id: 'call_1', output: 'result' } as any,
       { role: 'user', content: 'Follow up' },
     ]);
 
-    // function_call_output should be converted to user turn with fenced JSON
     expect(turns).toHaveLength(3);
     expect(turns[0].content).toBe('Call a tool');
     expect(turns[1].role).toBe('user');
-    expect(turns[1].content).toContain('```json');
+    expect(turns[1].content).toBe('[Tool Result: tool]\nresult');
     expect(turns[2].content).toBe('Follow up');
   });
 
-  it('returns empty array for undefined input', () => {
-    expect(convertOpenAIResponseMessages(undefined)).toEqual([]);
+  it('returns empty array for undefined input', async () => {
+    expect(await convertOpenAIResponseMessages(undefined)).toEqual([]);
   });
 
-  it('preserves command strings unchanged', () => {
-    const turns = convertOpenAIResponseMessages('/save');
+  it('preserves command strings unchanged', async () => {
+    const turns = await convertOpenAIResponseMessages('/save');
 
     expect(turns).toHaveLength(1);
     expect(turns[0].content).toBe('/save');
@@ -144,7 +221,7 @@ describe('convertOpenAIResponseMessages', () => {
 });
 
 describe('convertToolMessage', () => {
-  it('normalizes role: "tool" message to user with fenced JSON content', () => {
+  it('normalizes role: "tool" message to user tool-result text', () => {
     const result = convertToolMessage({
       role: 'tool',
       tool_call_id: 'call_abc123',
@@ -155,18 +232,10 @@ describe('convertToolMessage', () => {
     expect(Array.isArray(result)).toBe(false);
     const normalized = result as { role: string; content: string };
     expect(normalized.role).toBe('user');
-    // Content should be fenced JSON
-    expect(normalized.content).toMatch(/^```json\n.*\n```$/s);
-    // Extract and parse the JSON inside the fence
-    const jsonMatch = normalized.content.match(/```json\n(.*)\n```/s);
-    expect(jsonMatch).not.toBeNull();
-    const parsed = JSON.parse(jsonMatch![1]);
-    expect(parsed.type).toBe('function_call_output');
-    expect(parsed.call_id).toBe('call_abc123');
-    expect(parsed.output).toBe('Tool output here');
+    expect(normalized.content).toBe('[Tool Result: tool]\nTool output here');
   });
 
-  it('normalizes assistant with tool_calls to array of assistant messages', () => {
+  it('normalizes assistant with tool_calls to a short assistant turn', () => {
     const result = convertToolMessage({
       role: 'assistant',
       content: null,
@@ -177,23 +246,14 @@ describe('convertToolMessage', () => {
     });
 
     expect(result).not.toBeNull();
-    expect(Array.isArray(result)).toBe(true);
-    const normalizedArray = result as Array<{ role: string; content: string }>;
-    expect(normalizedArray).toHaveLength(2);
-
-    expect(normalizedArray[0].role).toBe('assistant');
-    const parsed1 = JSON.parse(normalizedArray[0].content);
-    expect(parsed1.type).toBe('function_call');
-    expect(parsed1.call_id).toBe('call_1');
-    expect(parsed1.name).toBe('get_weather');
-
-    expect(normalizedArray[1].role).toBe('assistant');
-    const parsed2 = JSON.parse(normalizedArray[1].content);
-    expect(parsed2.call_id).toBe('call_2');
-    expect(parsed2.name).toBe('get_time');
+    const normalized = result as { role: string; content: string };
+    expect(normalized.role).toBe('assistant');
+    expect(normalized.content).toBe(
+      '```json\n{"name":"user:get_weather","arguments":{"city":"NYC"}}\n```\n```json\n{"name":"user:get_time","arguments":{}}\n```',
+    );
   });
 
-  it('normalizes function_call (Responses API) to assistant with JSON', () => {
+  it('normalizes function_call (Responses API) to short assistant text', () => {
     const result = convertToolMessage({
       type: 'function_call',
       call_id: 'call_xyz',
@@ -202,36 +262,12 @@ describe('convertToolMessage', () => {
     });
 
     expect(result).not.toBeNull();
-    expect(Array.isArray(result)).toBe(false);
     const normalized = result as { role: string; content: string };
     expect(normalized.role).toBe('assistant');
-    const parsed = JSON.parse(normalized.content);
-    expect(parsed.type).toBe('function_call');
-    expect(parsed.call_id).toBe('call_xyz');
-    expect(parsed.name).toBe('search');
-    // Arguments should be kept as string
-    expect(typeof parsed.arguments).toBe('string');
-    expect(parsed.arguments).toBe('{"query":"test"}');
+    expect(normalized.content).toBe('```json\n{"name":"user:search","arguments":{"query":"test"}}\n```');
   });
 
-  it('normalizes function_call with object arguments to string', () => {
-    // Some clients send arguments as objects instead of strings
-    const result = convertToolMessage({
-      type: 'function_call',
-      call_id: 'call_xyz',
-      name: 'search',
-      arguments: { query: 'test' }, // Object instead of string
-    });
-
-    expect(result).not.toBeNull();
-    const normalized = result as { role: string; content: string };
-    const parsed = JSON.parse(normalized.content);
-    // Arguments should be stringified for consistent hashing
-    expect(typeof parsed.arguments).toBe('string');
-    expect(JSON.parse(parsed.arguments)).toEqual({ query: 'test' });
-  });
-
-  it('normalizes function_call_output (Responses API) to user with fenced JSON', () => {
+  it('normalizes function_call_output (Responses API) to user tool-result text', () => {
     const result = convertToolMessage({
       type: 'function_call_output',
       call_id: 'call_xyz',
@@ -239,27 +275,18 @@ describe('convertToolMessage', () => {
     });
 
     expect(result).not.toBeNull();
-    expect(Array.isArray(result)).toBe(false);
     const normalized = result as { role: string; content: string };
     expect(normalized.role).toBe('user');
-    // Content should be fenced JSON
-    expect(normalized.content).toMatch(/^```json\n.*\n```$/s);
-    // Extract and parse the JSON inside the fence
-    const jsonMatch = normalized.content.match(/```json\n(.*)\n```/s);
-    expect(jsonMatch).not.toBeNull();
-    const parsed = JSON.parse(jsonMatch![1]);
-    expect(parsed.type).toBe('function_call_output');
-    expect(parsed.call_id).toBe('call_xyz');
-    expect(parsed.output).toBe('Search results here');
+    expect(normalized.content).toBe('[Tool Result: tool]\nSearch results here');
   });
 
-  it('returns null for regular messages (no normalization needed)', () => {
+  it('returns null for regular messages (no normalization needed)', async () => {
     expect(convertToolMessage({ role: 'user', content: 'Hello' })).toBeNull();
     expect(convertToolMessage({ role: 'assistant', content: 'Hi!' })).toBeNull();
     expect(convertToolMessage({ role: 'system', content: 'Be helpful' })).toBeNull();
   });
 
-  it('returns null for invalid inputs', () => {
+  it('returns null for invalid inputs', async () => {
     expect(convertToolMessage(null)).toBeNull();
     expect(convertToolMessage(undefined)).toBeNull();
     expect(convertToolMessage('string')).toBeNull();
@@ -268,8 +295,8 @@ describe('convertToolMessage', () => {
 });
 
 describe('convertOpenAIChatMessages with tool messages', () => {
-  it('converts role: "tool" message to user turn with fenced JSON', () => {
-    const turns = convertOpenAIChatMessages([
+  it('converts role: "tool" message to user tool-result text', async () => {
+    const turns = await convertOpenAIChatMessages([
       { role: 'user', content: 'Call a tool' },
       { role: 'tool', tool_call_id: 'call_abc', content: 'Tool result' } as any,
     ]);
@@ -277,15 +304,12 @@ describe('convertOpenAIChatMessages with tool messages', () => {
     expect(turns).toHaveLength(2);
     expect(turns[0].role).toBe('user');
     expect(turns[0].content).toBe('Call a tool');
-    // Tool message is converted to user turn with fenced JSON
     expect(turns[1].role).toBe('user');
-    expect(turns[1].content).toContain('```json\n');
-    expect(turns[1].content).toContain('"type":"function_call_output"');
-    expect(turns[1].content).toContain('"call_id":"call_abc"');
+    expect(turns[1].content).toBe('[Tool Result: tool]\nTool result');
   });
 
-  it('converts assistant with tool_calls to assistant turns with JSON', () => {
-    const turns = convertOpenAIChatMessages([
+  it('converts assistant with tool_calls to a short assistant turn', async () => {
+    const turns = await convertOpenAIChatMessages([
       { role: 'user', content: 'Get the weather' },
       {
         role: 'assistant',
@@ -300,14 +324,11 @@ describe('convertOpenAIChatMessages with tool messages', () => {
     expect(turns[0].role).toBe('user');
     expect(turns[0].content).toBe('Get the weather');
     expect(turns[1].role).toBe('assistant');
-    const parsed = JSON.parse(turns[1].content);
-    expect(parsed.type).toBe('function_call');
-    expect(parsed.call_id).toBe('call_1');
-    expect(parsed.name).toBe('get_weather');
+    expect(turns[1].content).toBe('```json\n{"name":"user:get_weather","arguments":{"city":"NYC"}}\n```');
   });
 
-  it('handles full tool call conversation flow', () => {
-    const turns = convertOpenAIChatMessages([
+  it('handles full tool call conversation flow', async () => {
+    const turns = await convertOpenAIChatMessages([
       { role: 'user', content: 'What is the weather in NYC?' },
       {
         role: 'assistant',

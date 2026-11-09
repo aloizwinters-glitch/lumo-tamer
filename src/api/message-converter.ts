@@ -5,10 +5,22 @@
  * but also includes an optional `id` field for deduplication of tool messages.
  */
 
-import type { OpenAIChatMessage, OpenAIResponseMessage, OpenAIToolCall } from './types.js';
-import { Role } from '../lumo-client/index.js';
-import { addToolNameToFunctionOutput } from './tools/call-id.js';
-import { type MessageForStore } from 'src/conversations/types.js';
+import type { OpenAIChatMessage, OpenAIResponseMessage } from "./types.js";
+import { Role } from "../lumo-client/index.js";
+import {
+  addToolNameToFunctionOutput,
+  flattenToolItem,
+  formatClientToolCall,
+  resolveClientToolName,
+} from "./tools/call-id.js";
+import { type MessageForStore } from "src/conversations/types.js";
+import type { WireImage } from "@lumo/types-api.js";
+import {
+  extractGeneratedImages,
+  lumoImageMarker,
+  parseImageUrl,
+} from "../lumo-client/images.js";
+import { logger } from "../app/logger.js";
 
 /**
  * Extract text from OpenAI-compatible content shapes.
@@ -19,134 +31,113 @@ import { type MessageForStore } from 'src/conversations/types.js';
  * - { text: '...' }
  */
 function extractTextContent(content: unknown): string {
-  if (typeof content === 'string') return content;
+  if (typeof content === "string") return content;
 
   if (Array.isArray(content)) {
     const parts: string[] = [];
     for (const item of content) {
-      if (typeof item === 'string') {
+      if (typeof item === "string") {
         parts.push(item);
         continue;
       }
-      if (typeof item === 'object' && item !== null) {
+      if (typeof item === "object" && item !== null) {
         const obj = item as Record<string, unknown>;
-        if (typeof obj.text === 'string') {
+        if (typeof obj.text === "string") {
           parts.push(obj.text);
         }
       }
     }
-    return parts.join('\n').trim();
+    return parts.join("\n").trim();
   }
 
-  if (typeof content === 'object' && content !== null) {
+  if (typeof content === "object" && content !== null) {
     const obj = content as Record<string, unknown>;
-    if (typeof obj.text === 'string') return obj.text;
+    if (typeof obj.text === "string") return obj.text;
   }
 
-  return '';
+  return "";
+}
+
+/**
+ * Extract image inputs from OpenAI-compatible content parts.
+ * Supports:
+ * - Chat Completions: { type: 'image_url', image_url: { url } } (or image_url as a string)
+ * - Responses API:    { type: 'input_image', image_url: '...' }
+ *
+ * Images that can't be used are reported as notes so the model knows one was omitted.
+ */
+export function extractImageContent(content: unknown): {
+  images: WireImage[];
+  notes: string[];
+} {
+  const images: WireImage[] = [];
+  const notes: string[] = [];
+  if (!Array.isArray(content)) return { images, notes };
+
+  for (const item of content) {
+    if (typeof item !== "object" || item === null) continue;
+    const obj = item as Record<string, unknown>;
+    if (obj.type !== "image_url" && obj.type !== "input_image") continue;
+
+    const ref = obj.image_url;
+    const url =
+      typeof ref === "string"
+        ? ref
+        : typeof ref === "object" && ref !== null
+          ? (ref as Record<string, unknown>).url
+          : undefined;
+
+    const parsed = parseImageUrl(url);
+    if (parsed.ok) {
+      images.push(parsed.image);
+    } else {
+      logger.warn({ reason: parsed.reason }, "Skipping image input");
+      notes.push(`[Image omitted: ${parsed.reason}]`);
+    }
+  }
+  return { images, notes };
 }
 
 /**
  * Convert tool-related message formats to MessageForStore.
  *
- * Handles both Chat Completions (role: 'tool', tool_calls) and
- * Responses API (function_call, function_call_output) formats.
- *
- * Tool-related items are converted to user/assistant roles with JSON content,
- * since Lumo's tool_call/tool_result roles are reserved for SSE tools.
+ * Detection and text formatting live in flattenToolItem (the single
+ * OpenAI-to-Lumo tool mapping); this layer adds Role casting and call_id
+ * retention for deduplication.
  *
  * @returns Converted message(s), or null if item is not a tool message
  */
-export function convertToolMessage(item: unknown): MessageForStore | MessageForStore[] | null {
-  if (typeof item !== 'object' || item === null) return null;
-  const obj = item as Record<string, unknown>;
-
-  // Chat Completions: role: 'tool' -> user with fenced JSON
-  if (obj.role === 'tool' && 'tool_call_id' in obj) {
-    const json = JSON.stringify({
-      type: 'function_call_output',
-      call_id: obj.tool_call_id,
-      output: obj.content,
-    });
-    return {
-      role: Role.User,
-      content: '```json\n' + json + '\n```',
-      id: obj.tool_call_id as string,
-    };
+export function convertToolMessage(
+  item: unknown,
+): MessageForStore | MessageForStore[] | null {
+  const flat = flattenToolItem(item);
+  if (flat === null) return null;
+  if (flat.role === "assistant") {
+    return flat.content === ""
+      ? []
+      : { role: Role.Assistant, content: flat.content };
   }
-
-  // Chat Completions: assistant with tool_calls -> array of assistant messages with JSON
-  if (obj.role === 'assistant' && 'tool_calls' in obj && Array.isArray(obj.tool_calls)) {
-    const toolCalls = obj.tool_calls as OpenAIToolCall[];
-    return toolCalls.map(tc => {
-      // Normalize arguments: parse then re-stringify for consistent formatting
-      const args = typeof tc.function.arguments === 'string'
-        ? JSON.stringify(JSON.parse(tc.function.arguments))
-        : JSON.stringify(tc.function.arguments ?? {});
-      return {
-        role: Role.Assistant,
-        content: JSON.stringify({
-          type: 'function_call',
-          call_id: tc.id,
-          name: tc.function.name,
-          arguments: args,
-        }),
-        id: tc.id,
-      };
-    });
-  }
-
-  // Responses API: function_call -> assistant with JSON
-  if (obj.type === 'function_call') {
-    // Normalize arguments: parse then re-stringify for consistent formatting
-    // This ensures {"a": 1} and {"a":1} produce the same hash
-    const args = typeof obj.arguments === 'string'
-      ? JSON.stringify(JSON.parse(obj.arguments))
-      : JSON.stringify(obj.arguments ?? {});
-    return {
-      role: Role.Assistant,
-      content: JSON.stringify({
-        type: 'function_call',
-        call_id: obj.call_id,
-        name: obj.name,
-        arguments: args,
-      }),
-      id: obj.call_id as string,
-    };
-  }
-
-  // Responses API: function_call_output -> user with fenced JSON
-  if (obj.type === 'function_call_output') {
-    const json = JSON.stringify({
-      type: 'function_call_output',
-      call_id: obj.call_id,
-      output: obj.output,
-    });
-    return {
-      role: Role.User,
-      content: '```json\n' + json + '\n```',
-      id: obj.call_id as string,
-    };
-  }
-
-  return null;
+  return flat.callId
+    ? { role: Role.User, content: flat.content, id: flat.callId }
+    : { role: Role.User, content: flat.content };
 }
 
 /**
  * Extract system/developer message content from a ChatMessage array.
  * Exported for routes to build instructions.
  */
-export function extractSystemMessage(messages: OpenAIChatMessage[]): string | undefined {
-  const systemMsg = messages.find(m =>
-    m.role === 'system' || (m.role as string) === 'developer'
+export function extractSystemMessage(
+  messages: OpenAIChatMessage[],
+): string | undefined {
+  const systemMsg = messages.find(
+    (m) => m.role === "system" || (m.role as string) === "developer",
   );
-  if (systemMsg && 'content' in systemMsg) {
+  if (systemMsg && "content" in systemMsg) {
     const content = extractTextContent(systemMsg.content);
     return content || undefined;
   }
   return undefined;
 }
-
 
 /**
  * Convert OpenAI ChatMessage[] to MessageForStore[].
@@ -157,12 +148,14 @@ export function extractSystemMessage(messages: OpenAIChatMessage[]): string | un
  *
  * Preserves semantic IDs (call_id) for tool messages to enable deduplication.
  */
-export function convertOpenAIChatMessages(messages: OpenAIChatMessage[]): MessageForStore[] {
+export async function convertOpenAIChatMessages(
+  messages: OpenAIChatMessage[],
+): Promise<MessageForStore[]> {
   const result: MessageForStore[] = [];
 
   for (const msg of messages) {
     // Skip system/developer messages - they're handled via instructions parameter
-    if (msg.role === 'system' || (msg.role as string) === 'developer') {
+    if (msg.role === "system" || (msg.role as string) === "developer") {
       continue;
     }
 
@@ -172,19 +165,39 @@ export function convertOpenAIChatMessages(messages: OpenAIChatMessage[]): Messag
       const convertedArray = Array.isArray(converted) ? converted : [converted];
       for (const item of convertedArray) {
         // For function_call_output, add prefixed tool_name for Lumo context
-        const content = item.role === Role.User
-          ? addToolNameToFunctionOutput(item.content ?? '')
-          : item.content;
+        const content =
+          item.role === Role.User
+            ? addToolNameToFunctionOutput(item.content ?? "")
+            : item.content;
         result.push({ role: item.role, content, id: item.id });
       }
       continue;
     }
 
-    // Regular user/assistant message
-    result.push({
-      role: msg.role === 'user' ? Role.User : Role.Assistant,
-      content: extractTextContent(msg.content),
-    });
+    const rawContent = "content" in msg ? msg.content : undefined;
+    const text = extractTextContent(rawContent);
+    const role = msg.role === "user" ? Role.User : Role.Assistant;
+
+    if (role === Role.User) {
+      // Like the web client: one <lumo-image source="user"> marker per image, in the
+      // same turn as the bytes (the backend pairs them; edit_image uses the id).
+      const { images, notes } = extractImageContent(rawContent);
+      const markers = images.map((im) => lumoImageMarker(im.image_id, "user"));
+      const content = [text, ...notes, ...markers].filter(Boolean).join("\n");
+      result.push(
+        images.length > 0 ? { role, content, images } : { role, content },
+      );
+      continue;
+    }
+
+    // Assistant: generated images echoed back as markdown data URLs are replayed
+    // as Lumo images (marker + bytes) so edit_image / describe_image can use them.
+    const generated = extractGeneratedImages(text);
+    result.push(
+      generated.images.length > 0
+        ? { role, content: generated.content, images: generated.images }
+        : { role, content: text },
+    );
   }
 
   return result;
@@ -196,16 +209,16 @@ export function convertOpenAIChatMessages(messages: OpenAIChatMessage[]): Messag
  * Handles both string input and message array input.
  * Preserves semantic IDs for tool messages to enable deduplication.
  */
-export function convertOpenAIResponseMessages(
+export async function convertOpenAIResponseMessages(
   input: string | OpenAIResponseMessage[] | undefined,
-  requestInstructions?: string
-): MessageForStore[] {
+  requestInstructions?: string,
+): Promise<MessageForStore[]> {
   if (!input) {
     return [];
   }
 
   // Simple string input
-  if (typeof input === 'string') {
+  if (typeof input === "string") {
     return [{ role: Role.User, content: input }];
   }
 
@@ -215,34 +228,42 @@ export function convertOpenAIResponseMessages(
   // - regular messages -> passed through
   const chatMessages: OpenAIChatMessage[] = [];
   for (const item of input) {
-    if (typeof item !== 'object') continue;
-    const itemType = 'type' in item ? (item as { type: string }).type : undefined;
-    if (itemType === 'function_call') {
-      const fc = item as unknown as { name: string; arguments: string };
+    if (typeof item !== "object") continue;
+    const itemType =
+      "type" in item ? (item as { type: string }).type : undefined;
+    if (itemType === "function_call") {
+      const fc = item as unknown as {
+        name: string;
+        arguments?: unknown;
+        call_id?: string;
+      };
       chatMessages.push({
-        role: 'assistant',
-        content: JSON.stringify({ name: fc.name, arguments: JSON.parse(fc.arguments || '{}') }),
+        role: "assistant",
+        content: formatClientToolCall(
+          resolveClientToolName(fc.call_id, fc.name),
+          fc.arguments,
+        ),
       });
       continue;
     }
     // function_call_output will be handled by convertToolMessage in convertChatMessages
-    if (itemType === 'function_call_output') {
+    if (itemType === "function_call_output") {
       // Pass through as-is - convertChatMessages will normalize it
       chatMessages.push(item as unknown as OpenAIChatMessage);
       continue;
     }
-    if ('role' in item && 'content' in item) {
+    if ("role" in item && "content" in item) {
       const obj = item as { role: string; content: unknown };
       chatMessages.push({
-        role: obj.role as 'user' | 'assistant' | 'system',
-        content: extractTextContent(obj.content),
+        role: obj.role as "user" | "assistant" | "system",
+        content: obj.content as string,
       });
     }
   }
 
   // If request instructions provided and no system message exists, add one
-  if (requestInstructions && !chatMessages.some(m => m.role === 'system')) {
-    chatMessages.unshift({ role: 'system', content: requestInstructions });
+  if (requestInstructions && !chatMessages.some((m) => m.role === "system")) {
+    chatMessages.unshift({ role: "system", content: requestInstructions });
   }
 
   return convertOpenAIChatMessages(chatMessages);
