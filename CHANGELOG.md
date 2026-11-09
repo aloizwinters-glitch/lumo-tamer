@@ -1,3 +1,20 @@
+## [0.7.0-dev.18](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.17...v0.7.0-dev.18) (2026-11-09)
+
+### Bug Fixes
+
+* fix(images): only offer image tools on turns that involve images
+
+  generate_image/edit_image/describe_image were advertised on every request.
+  Agent clients (OpenCode) send one request per tool-loop step plus bounces,
+  with a large system prompt, so Lumo kept generating images nobody asked for.
+
+  Image tools are now offered only when the last real user message attached
+  an image, asks for a picture, or follows up on an image already in the
+  conversation; never on bounces, and never again on tool-loop steps once an
+  image was generated after that message. README documents the gating.
+
+  (squashes his docs commit 7aeea32 into the fix)
+
 ## [0.7.0-dev.17](https://github.com/banter240/lumo-tamer/compare/v0.7.0-dev.16...v0.7.0-dev.17) (2026-11-07)
 
 ### Features
