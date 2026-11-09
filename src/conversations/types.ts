@@ -7,6 +7,7 @@
 import type { ConversationId, MessageId, SpaceId, ProjectSpace, ConversationPriv, MessagePub, ConversationPub, Role } from '@lumo/types.js';
 import { ConversationStatus } from '@lumo/types.js';
 import type { RemoteId } from '@lumo/remote/types.ts';
+import type { WireImage } from '@lumo/types-api.js';
 
 // Re-export types for consumers
 export type { ConversationId, MessageId, SpaceId, RemoteId, ProjectSpace, ConversationPriv, MessagePub, ConversationPub };
@@ -61,6 +62,7 @@ export interface ConversationState {
     messages: Message[];
     // Sync tracking
     dirty: boolean;             // Needs sync to server
+    private?: boolean;          // /private: keep local, do not sync
     remoteId?: RemoteId;        // Server-assigned ID (if synced)
     lastSyncedAt?: number;      // Last successful sync timestamp
 }
@@ -81,4 +83,5 @@ export interface MessageForStore {
     role: Role;
     content?: string;
     id?: string; // Semantic ID for deduplication (call_id for tools)
+    images?: WireImage[]; // Image input (sent to Lumo, not persisted)
 }

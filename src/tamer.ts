@@ -4,29 +4,38 @@ import arg from 'arg';
 import { initConfig, getLogConfig, isUsingConfigDefaults } from './app/config.js';
 import { getConfigPath } from './app/config-file.js';
 import { initLogger, logger } from './app/logger.js';
-import { printAuthHelp, printHelp, printServerHelp } from './app/terminal.js';
+import { print, printAuthHelp, printHelp, printServerHelp, printUpdateHelp } from './app/terminal.js';
+import { setDataDir } from './app/paths.js';
 import './shims/uint8array-base64-polyfill.js';
 
 // stopAtPositional ensures --help after a subcommand is passed to the subcommand
 const args = arg({
   '--help': Boolean,
   '-h': '--help',
+  '--home': String,
 }, {
   permissive: true,
   stopAtPositional: true,
   argv: process.argv.slice(2)
 });
 
+if (args['--home']) {
+  setDataDir(args['--home']);
+}
+
 const mode = args._[0] === 'server' ? 'server' : 'cli';
 initConfig(mode);
 initLogger(getLogConfig());
-if (isUsingConfigDefaults()) logger.info(`No config.yaml found at ${getConfigPath()}, using defaults.`);
+if (isUsingConfigDefaults()) {
+  logger.info(`No config.yaml found at ${getConfigPath()}, using defaults.`);
+}
 
 // Handle --help for main command and subcommands
 if (args['--help'] || args._.includes('--help') || args._.includes('-h')) {
   switch (args._[0]) {
     case 'auth': printAuthHelp(); break;
     case 'server': printServerHelp(); break;
+    case 'update': printUpdateHelp(); break;
     default: printHelp();
   }
   process.exit(0);
@@ -47,13 +56,44 @@ if (args._[0] === 'auth') {
   const { runAuthCommand } = await import('./auth/authenticate.js');
   await runAuthCommand(args._.slice(1));
   process.exit(0);
+} else if (args._[0] === 'update') {
+  const { checkForUpdate, applyUpdate, recreatePeer } = await import('./app/updates.js');
+  const sub = args._[1];
+  try {
+    if (sub === 'recreate') {
+      await recreatePeer(args._[2] || 'lumo-tamer');
+      process.exit(0);
+    }
+    if (sub === 'apply') {
+      const result = await applyUpdate();
+      print(result.message);
+      process.exit(result.ok ? 0 : 1);
+    }
+    const status = await checkForUpdate();
+    if (status.error) {
+      print(`Update check failed: ${status.error}`);
+      process.exit(1);
+    }
+    if (!status.available) {
+      print(`Up to date (${status.current}) on ${status.channel} / ${status.repository}.`);
+      process.exit(0);
+    }
+    print(`Update available: ${status.current} → ${status.latest} (${status.channel})`);
+    if (status.latestUrl) print(status.latestUrl);
+    if (status.canApply) print('Apply with: tamer update apply');
+    else if (status.applyHint) print(status.applyHint);
+    process.exit(0);
+  } catch (error) {
+    print(`Update failed: ${error instanceof Error ? error.message : String(error)}`);
+    process.exit(1);
+  }
 } else if (args._[0] === 'server') {
   const { Application } = await import('./app/index.js');
   const { APIServer } = await import('./api/server.js');
 
   logger.info('Starting lumo-tamer API Server...');
 
-  const app = await Application.create();
+  const app = await Application.create({ allowMissingVault: true });
   const apiServer = new APIServer(app);
   await apiServer.start();
 

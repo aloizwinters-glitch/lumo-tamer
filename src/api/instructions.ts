@@ -116,23 +116,41 @@ function extractToolNames(tools?: OpenAITool[]): string[] {
  * @param clientInstructions - Optional instructions from client (system/developer message)
  * @returns Formatted instruction string
  */
-export function buildInstructions(tools?: OpenAITool[], clientInstructions?: string): string {
+export function buildInstructions(
+  tools?: OpenAITool[],
+  clientInstructions?: string,
+  options: { compact?: boolean } = {},
+): string {
   const instructionsConfig = getServerInstructionsConfig();
   const toolsConfig = getCustomToolsConfig();
   const { prefix } = toolsConfig;
   const { replacePatterns } = instructionsConfig;
+  const compact = options.compact === true;
 
   // Determine if we should include tools
   const includeTools = toolsConfig.enabled && tools && tools.length > 0;
 
-  // Pre-interpolate forTools block (it can use {{prefix}})
-  const forTools = interpolateTemplate(instructionsConfig.forTools, { prefix });
+  // Full protocol on the first user turn; a short reminder after that.
+  let forToolsTemplate = compact ? instructionsConfig.forToolsCompact : instructionsConfig.forTools;
 
-  // Prepare tools JSON if enabled and provided
+  if (includeTools && toolsConfig.modules) {
+    const enabledModules = Object.entries(toolsConfig.modules)
+      .filter(([, mod]) => mod.enabled && mod.prompt && mod.prompt.trim())
+      .map(([name, mod]) => `\n\n# ${name}\n${mod.prompt!.trim()}`);
+    if (enabledModules.length > 0) {
+      forToolsTemplate += enabledModules.join('\n');
+    }
+  }
+
+  const forTools = interpolateTemplate(
+    forToolsTemplate,
+    { prefix },
+  );
+
   let toolsJson: string | undefined;
-  if (includeTools) {
-    const prefixedTools = applyToolPrefix(tools, prefix);
-    toolsJson = JSON.stringify(prefixedTools, null, 2);
+  if (includeTools && tools) {
+    // Always send full tool schemas. compact only shortens the protocol wrapper.
+    toolsJson = JSON.stringify(applyToolPrefix(tools, prefix), null, 2);
   }
 
   // Clean and prefix client instructions

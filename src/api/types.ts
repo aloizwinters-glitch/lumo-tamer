@@ -5,11 +5,12 @@ import type { AuthManager } from '../auth/index.js';
 
 export interface EndpointDependencies {
   queue: RequestQueue;
-  lumoClient: LumoClient;
+  lumoClient?: LumoClient;
   conversationStore?: ConversationStore | FallbackStore;
   syncInitialized?: boolean;
   authManager?: AuthManager;
   vaultPath?: string;
+  sessionNotice?: string | null;
 }
 
 // Chat Completions API types
@@ -31,7 +32,7 @@ export interface AssistantMessageWithToolCalls {
 // Standard message with role and content
 export interface StandardChatMessage {
   role: 'user' | 'assistant' | 'system';
-  content: string;
+  content: string | unknown;
 }
 
 // Union type for all possible chat messages in requests
@@ -66,12 +67,21 @@ export interface OpenAIChatRequest {
   stream?: boolean;
   temperature?: number;
   max_tokens?: number;
+  max_completion_tokens?: number;
   // Thinking mode: 'none' disables; 'low'/'medium'/'high' enable reasoning.
-  reasoning_effort?: 'none' | 'low' | 'medium' | 'high' | null;
+  reasoning_effort?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh' | 'default' | null;
   tools?: OpenAITool[];
+  tool_choice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } };
   user?: string;
   // Custom extension for conversation persistence
   conversation_id?: string;
+  // OpenAI structured outputs (Mealie, HA automations). Not native on Lumo;
+  // we inject an instruction and strip fences from the reply.
+  response_format?: {
+    type?: string;
+    json_schema?: { name?: string; schema?: unknown; strict?: boolean; description?: string };
+    schema?: unknown;
+  };
 }
 
 // Extended chat message with optional tool calls (for responses)
@@ -130,6 +140,11 @@ export interface OpenAIStreamChunk {
     delta: StreamingDelta;
     finish_reason: string | null;
   }>;
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 }
 
 // Responses API types
@@ -139,8 +154,13 @@ export interface FunctionCallOutput {
   output: string;
 }
 
+/** Responses API content parts accepted on input messages (text + image input). */
+export type OpenAIResponseContentPart =
+  | { type: 'input_text' | 'output_text' | 'text'; text: string }
+  | { type: 'input_image'; image_url: string; detail?: 'low' | 'high' | 'auto' };
+
 export type OpenAIResponseMessage =
-  | { role: string; content: string }
+  | { role: string; content: string | OpenAIResponseContentPart[] }
   | FunctionCallOutput;
 
 export interface OpenAIResponseRequest {
@@ -157,6 +177,7 @@ export interface OpenAIResponseRequest {
   store?: boolean;
   metadata?: Record<string, string>;
   tools?: any[];
+  tool_choice?: 'none' | 'auto' | 'required' | { type: 'function'; function: { name: string } };
   // Continuation from previous response (stateless mode)
   previous_response_id?: string;
   // Conversation identifier (per OpenAI spec: string ID or object)
@@ -166,7 +187,7 @@ export interface OpenAIResponseRequest {
 }
 
 // Output item types for OpenAI Response
-export type OutputItem = MessageOutputItem | FunctionCallOutputItem;
+export type OutputItem = MessageOutputItem | FunctionCallOutputItem | ReasoningOutputItem;
 
 export interface MessageOutputItem {
   type: 'message';
@@ -177,6 +198,16 @@ export interface MessageOutputItem {
     type: 'output_text';
     text: string;
     annotations: any[];
+  }>;
+}
+
+export interface ReasoningOutputItem {
+  type: 'reasoning';
+  id: string;
+  status: 'completed' | 'in_progress';
+  content: Array<{
+    type: 'reasoning_text';
+    text: string;
   }>;
 }
 
@@ -247,4 +278,6 @@ export type ResponseStreamEvent =
   | { type: 'response.output_text.done'; item_id: string; output_index: number; content_index: number; text: string; sequence_number: number }
   | { type: 'response.function_call_arguments.delta'; item_id: string; output_index: number; delta: string; sequence_number: number }
   | { type: 'response.function_call_arguments.done'; item_id: string; output_index: number; arguments: string; name: string; sequence_number: number }
+  | { type: 'response.reasoning_text.delta'; item_id: string; output_index: number; content_index: number; delta: string; sequence_number: number }
+  | { type: 'response.reasoning_text.done'; item_id: string; output_index: number; content_index: number; text: string; sequence_number: number }
   | { type: 'error'; code: string; message: string; param: string | null; sequence_number: number };

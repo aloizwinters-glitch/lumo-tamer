@@ -4,8 +4,9 @@
  */
 
 import { logger } from './logger.js';
-import { getCommandsConfig } from './config.js';
+import { getCommandsConfig, getConversationsConfig } from './config.js';
 import { getSyncService, getConversationStore, getAutoSyncService } from '../conversations/index.js';
+import { markConversationPrivate, isConversationPrivate } from '../conversations/privacy.js';
 import type { AuthManager } from '../auth/index.js';
 import type { Turn } from '../lumo-client/index.js';
 
@@ -115,6 +116,9 @@ export async function executeCommand(
       case 'refreshtokens':
         return await handleRefreshTokensCommand(context);
 
+      case 'update':
+        return await handleUpdateCommand(params);
+
       case 'ole':
         return 'ole!';
 
@@ -122,9 +126,11 @@ export async function executeCommand(
       case 'new':
       case 'clear':
       case 'reset':
-      case 'private':
       case 'open':
         return `Command /${lowerCommand} is not available.`;
+
+      case 'private':
+        return handlePrivateCommand(context);
 
       default:
         logger.warn(`Unknown command: /${commandName}`);
@@ -144,7 +150,9 @@ function getHelpText(): string {
   /save [title]      - Save stateless request to conversation (optionally set title)
   /load <id>         - Load a conversation from Proton by ID
   /refreshtokens     - Manually refresh auth tokens
+  /update [apply]    - Check GitHub for a new image; apply recreates this container
   /logout            - Revoke session and delete tokens
+  /private           - Keep this conversation local (do not sync)
   /quit              - Exit CLI (CLI mode only)${wakewordHint}`;
 }
 
@@ -153,6 +161,25 @@ function getHelpText(): string {
  *
  * Inspired by WebClients ConversationHeader.tsx title editing
  */
+function handlePrivateCommand(context?: CommandContext): string {
+  if (!context?.conversationId) {
+    return 'No active conversation to mark private.';
+  }
+  markConversationPrivate(context.conversationId);
+  try {
+    const store = getConversationStore();
+    if (store && 'markPrivate' in store && typeof store.markPrivate === 'function') {
+      store.markPrivate(context.conversationId);
+    }
+  } catch {
+    // Store not up yet; the in-memory flag is enough to skip sync.
+  }
+  if (!getConversationsConfig().enableSync) {
+    return 'Sync is already off. Marked this conversation private anyway.';
+  }
+  return 'This conversation will stay local and will not sync to Proton.';
+}
+
 function handleTitleCommand(params: string, context?: CommandContext): string {
   if (!params.trim()) {
     return 'Usage: /title <new title>';
@@ -186,6 +213,10 @@ async function handleSaveCommand(params: string, context?: CommandContext): Prom
     const store = getConversationStore();
     let conversationId = context?.conversationId;
     let wasCreated = false;
+
+    if (conversationId && isConversationPrivate(conversationId)) {
+      return 'This conversation is private and will not sync.';
+    }
 
     // Handle stateless requests - create conversation from turns
     if (!conversationId) {
@@ -271,7 +302,44 @@ async function handleRefreshTokensCommand(context?: CommandContext): Promise<str
     return 'Tokens refreshed successfully.';
   } catch (error) {
     logger.error({ error }, 'Failed to execute /refreshtokens command');
-    return `Token refresh failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
+    return `Token refresh failed: ${error instanceof Error ? error.message : 'Unknown error'}. Open /auth and log in again.`;
+  }
+}
+
+/**
+ * Handle /update [apply] — GitHub check, optional Docker self-update
+ */
+async function handleUpdateCommand(params: string): Promise<string> {
+  const { checkForUpdate, applyUpdate } = await import('./updates.js');
+  const apply = /^\s*apply\b/i.test(params);
+  try {
+    if (apply) {
+      const result = await applyUpdate();
+      return result.message;
+    }
+    const status = await checkForUpdate();
+    if (status.error) return `Update check failed: ${status.error}`;
+    if (!status.available) {
+      return `Up to date (${status.current}) on ${status.channel} / ${status.repository}.`;
+    }
+    const lines = [
+      status.action === 'downgrade'
+        ? `Downgrade on ${status.channel}/main: ${status.current} → ${status.latest}. Config and the vault may not load.`
+        : status.action === 'switch'
+          ? `Switch to ${status.channel} ${status.latest} (image :${status.channelTag}).`
+          : `Update available: ${status.current} → ${status.latest} (${status.channel}).`,
+      status.latestUrl ? status.latestUrl : '',
+      status.applyHint || '',
+    ].filter(Boolean);
+    if (status.canApply) {
+      lines.push('Apply with /update apply (pulls the GHCR tag and recreates this container via docker.sock).');
+    } else if (status.applyHint) {
+      lines.push(status.applyHint);
+    }
+    return lines.join('\n');
+  } catch (error) {
+    logger.error({ error }, 'Failed to execute /update command');
+    return `Update failed: ${error instanceof Error ? error.message : 'Unknown error'}`;
   }
 }
 

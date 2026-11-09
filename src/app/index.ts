@@ -5,38 +5,141 @@
  * providing a unified context for both CLI and API modes.
  */
 
+import { existsSync } from 'fs';
 import { getConversationsConfig, authConfig, mockConfig } from './config.js';
 import { logger } from './logger.js';
-import { resolveProjectPath } from './paths.js';
+import { resolveDataPath } from './paths.js';
 import { LumoClient } from '../lumo-client/index.js';
-import { createAuthProvider, AuthManager, type AuthProvider, type ProtonApi } from '../auth/index.js';
+import {
+  createAuthProvider,
+  AuthManager,
+  deleteTokenCache,
+  isPermanentRefreshFailure,
+  SESSION_EXPIRED_NOTICE,
+  type AuthProvider,
+  type ProtonApi,
+} from '../auth/index.js';
 import { getConversationStore, getFallbackStore, setConversationStore, type ConversationStore, initializeSync, initializeConversationStore, FallbackStore } from '../conversations/index.js';
 import { createMockProtonApi } from '../mock/mock-api.js';
 import { installFetchAdapter } from '../shims/fetch-adapter.js';
 import { suppressFullApiErrors } from '../shims/console.js';
 
+export function isRecoverableAuthError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error);
+  // Vault / session errors that mean "needs re-login" rather than fatal crash
+  return /Vault not found|No secure key storage|Cannot generate vault key|Failed to decrypt vault|Vault key file |Invalid vault key|Key file exists but is invalid|is a directory|Token file missing|wrong key or corrupted|Run: tamer auth|Token refresh failed|No refresh token available|No access token in refresh response/i.test(msg);
+}
+
 export class Application {
-  private lumoClient!: LumoClient;
-  private authProvider!: AuthProvider;
-  private authManager!: AuthManager;
-  private protonApi!: ProtonApi;
-  private uid!: string;
+  private lumoClient?: LumoClient;
+  private authProvider?: AuthProvider;
+  private authManager?: AuthManager;
+  private protonApi?: ProtonApi;
+  private uid?: string;
   private syncInitialized = false;
   private cleanupFetchAdapter?: () => void;
+  private onSessionInvalidCb?: () => void;
+  private sessionNotice: string | null = null;
 
   /**
    * Create and initialize the application
    */
-  static async create(): Promise<Application> {
+  static async create(options: { allowMissingVault?: boolean } = {}): Promise<Application> {
     const app = new Application();
     if (mockConfig.enabled) {
       await app.initializeMock();
-    } else {
-      await app.initializeAuth();
-      await app.initializeStore();
-      await app.initializeSync();
+      return app;
+    }
+    if (!options.allowMissingVault) {
+      await app.bootAuthenticated();
+      return app;
+    }
+    if (!app.vaultExists()) {
+      app.initializeUnauthenticated('No auth vault. Open /auth in a browser to log in.');
+      return app;
+    }
+    try {
+      await app.bootAuthenticated();
+    } catch (error) {
+      if (!isRecoverableAuthError(error)) throw error;
+      const refreshDead = isPermanentRefreshFailure(error)
+        || /Token refresh failed|No refresh token available|No access token in refresh/i.test(
+          error instanceof Error ? error.message : String(error),
+        );
+      if (refreshDead) {
+        try {
+          await deleteTokenCache(resolveDataPath(authConfig.vault.path));
+        } catch { /* still wait for /auth */ }
+        app.sessionNotice = SESSION_EXPIRED_NOTICE;
+        app.initializeUnauthenticated(SESSION_EXPIRED_NOTICE);
+      } else {
+        app.initializeUnauthenticated(
+          'Auth vault is unusable (missing key or cannot decrypt). Open /auth to log in again.',
+        );
+      }
+      logger.warn({ error }, 'Skipped broken vault; waiting for /auth');
     }
     return app;
+  }
+
+  private vaultExists(): boolean {
+    return existsSync(resolveDataPath(authConfig.vault.path));
+  }
+
+  private initializeUnauthenticated(reason: string): void {
+    setConversationStore(getFallbackStore());
+    logger.warn(reason);
+  }
+
+  private dropSession(): void {
+    this.authManager?.destroy();
+    this.cleanupFetchAdapter?.();
+    this.cleanupFetchAdapter = undefined;
+    this.authManager = undefined;
+    this.authProvider = undefined;
+    this.protonApi = undefined;
+    this.lumoClient = undefined;
+    this.uid = undefined;
+    this.syncInitialized = false;
+  }
+
+  private async bootAuthenticated(): Promise<void> {
+    await this.initializeAuth();
+    await this.initializeStore();
+    await this.initializeSync();
+  }
+
+  isAuthenticated(): boolean {
+    if (mockConfig.enabled && this.lumoClient) return true;
+    return !!this.authManager && !!this.lumoClient;
+  }
+
+  /**
+   * Drop the in-memory session after /auth logout or a dead refresh token.
+   * Vault is already deleted by logout / AuthManager.invalidateSession.
+   */
+  clearAuth(reason?: string): void {
+    if (reason) this.sessionNotice = reason;
+    this.dropSession();
+    this.initializeUnauthenticated(reason || 'Signed out. Open /auth to log in again.');
+  }
+
+  getSessionNotice(): string | null {
+    return this.sessionNotice;
+  }
+
+  /**
+   * Load a vault written by /auth or `tamer auth` without restarting.
+   */
+  async applyVaultAuth(): Promise<void> {
+    this.dropSession();
+    await this.bootAuthenticated();
+    this.sessionNotice = null;
+  }
+
+  /** Set callback for when session becomes invalid (called from APIServer) */
+  setOnSessionInvalid(cb: () => void): void {
+    this.onSessionInvalidCb = cb;
   }
 
   /**
@@ -71,7 +174,7 @@ export class Application {
     this.authProvider = await createAuthProvider();
 
     // Create AuthManager with auto-refresh configuration
-    const vaultPath = resolveProjectPath(authConfig.vault.path);
+    const vaultPath = resolveDataPath(authConfig.vault.path);
     const autoRefreshConfig = authConfig.autoRefresh;
 
     this.authManager = new AuthManager({
@@ -81,6 +184,10 @@ export class Application {
         enabled: autoRefreshConfig.enabled,
         intervalHours: autoRefreshConfig.intervalHours,
         onError: autoRefreshConfig.onError,
+      },
+      onSessionInvalid: (reason?: string) => {
+        this.clearAuth(reason ?? SESSION_EXPIRED_NOTICE);
+        this.onSessionInvalidCb?.();
       },
     });
 
@@ -108,10 +215,16 @@ export class Application {
    */
   private async initializeStore(): Promise<void> {
     const conversationsConfig = getConversationsConfig();
+    const protonApi = this.protonApi;
+    const uid = this.uid;
+    const authProvider = this.authProvider;
+    if (!protonApi || !uid || !authProvider) {
+      throw new Error('Auth not initialized');
+    }
     await initializeConversationStore({
-      protonApi: this.protonApi,
-      uid: this.uid,
-      authProvider: this.authProvider,
+      protonApi,
+      uid,
+      authProvider,
       conversationsConfig,
     });
   }
@@ -121,10 +234,16 @@ export class Application {
    */
   private async initializeSync(): Promise<void> {
     const conversationsConfig = getConversationsConfig();
+    const protonApi = this.protonApi;
+    const uid = this.uid;
+    const authProvider = this.authProvider;
+    if (!protonApi || !uid || !authProvider) {
+      throw new Error('Auth not initialized');
+    }
     const result = await initializeSync({
-      protonApi: this.protonApi,
-      uid: this.uid,
-      authProvider: this.authProvider,
+      protonApi,
+      uid,
+      authProvider,
       conversationsConfig,
     });
     this.syncInitialized = result.initialized;
@@ -133,6 +252,9 @@ export class Application {
   // AppContext implementation
 
   getLumoClient(): LumoClient {
+    if (!this.lumoClient) {
+      throw new Error('Not authenticated. Open /auth or run: tamer auth');
+    }
     return this.lumoClient;
   }
 

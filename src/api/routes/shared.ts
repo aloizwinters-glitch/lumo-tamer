@@ -1,14 +1,24 @@
-import { randomUUID } from 'crypto';
-import type { Response } from 'express';
-import { getCustomToolsConfig } from '../../app/config.js';
-import { getMetrics } from '../../app/metrics';
-import type { CommandContext } from '../../app/commands.js';
-import type { EndpointDependencies, OpenAITool, OpenAIToolCall } from '../types.js';
-import type { ConversationId } from '../../conversations/types.js';
-import type { ChatResult, AssistantMessageData } from '../../lumo-client/index.js';
+import { randomUUID } from "crypto";
+import type { Response } from "express";
+import { getCustomToolsConfig } from "../../app/config.js";
+import { shouldRequestTitle } from "../request-prep.js";
+import { getMetrics } from "../../app/metrics";
+import type { CommandContext } from "../../app/commands.js";
+import type {
+  EndpointDependencies,
+  OpenAITool,
+  OpenAIToolCall,
+} from "../types.js";
+import type { ConversationId } from "../../conversations/types.js";
+import type {
+  ChatResult,
+  AssistantMessageData,
+  LumoUsage,
+} from "../../lumo-client/index.js";
+import type { OpenAIChatResponse } from "../types.js";
 
 // Re-export for convenience
-export { tryExecuteCommand, type CommandResult } from '../../app/commands.js';
+export { tryExecuteCommand, type CommandResult } from "../../app/commands.js";
 
 // ── Tool call type for persistence ─────────────────────────────────
 
@@ -24,10 +34,10 @@ export interface ToolCallForPersistence {
  * Returns undefined if no tool calls were emitted.
  */
 export function mapToolCallsForPersistence(
-  toolCallsEmitted: OpenAIToolCall[]
+  toolCallsEmitted: OpenAIToolCall[],
 ): ToolCallForPersistence[] | undefined {
   if (toolCallsEmitted.length === 0) return undefined;
-  return toolCallsEmitted.map(tc => ({
+  return toolCallsEmitted.map((tc) => ({
     name: tc.function.name,
     arguments: tc.function.arguments,
     call_id: tc.id,
@@ -41,15 +51,26 @@ export interface RequestContext {
   commandContext: CommandContext;
   requestTitle: boolean;
 }
+/** Proton reports completion_tokens; prompt_tokens is estimated from request body. */
+export function toOpenAIChatUsage(
+  usage?: LumoUsage,
+): OpenAIChatResponse["usage"] | undefined {
+  if (usage?.completion_tokens == null) return undefined;
 
-/**
- * Build the common request context shared by all handler variants.
- * When conversationId is undefined (stateless request), requestTitle is false.
- */
+  const promptTokens = usage.prompt_tokens ?? 0;
+  return {
+    prompt_tokens: promptTokens,
+    completion_tokens: usage.completion_tokens,
+    total_tokens: promptTokens + usage.completion_tokens,
+  };
+}
+
+export { resolveInjectInto } from "../request-prep.js";
+
 export function buildRequestContext(
   deps: EndpointDependencies,
   conversationId: ConversationId | undefined,
-  tools?: OpenAITool[]
+  tools?: OpenAITool[],
 ): RequestContext {
   const serverToolsConfig = getCustomToolsConfig();
   return {
@@ -59,19 +80,20 @@ export function buildRequestContext(
       conversationId,
       authManager: deps.authManager,
     },
-    // Only request title for stateful conversations that haven't been titled yet
-    requestTitle: conversationId
-      ? deps.conversationStore?.get(conversationId)?.title === 'New Conversation'
-      : false,
+    requestTitle: shouldRequestTitle(deps, conversationId),
   };
 }
 
 // ── Persistence helpers ────────────────────────────────────────────
 
 /** Persist title if Lumo generated one. No-op for stateless requests. */
-export function persistTitle(result: ChatResult, deps: EndpointDependencies, conversationId: ConversationId | undefined): void {
+export function persistTitle(
+  result: ChatResult,
+  deps: EndpointDependencies,
+  conversationId: ConversationId | undefined,
+): void {
   if (!conversationId || !result.title || !deps.conversationStore) return;
-  deps.conversationStore.setTitle(conversationId, result.title);  // Already processed by LumoClient
+  deps.conversationStore.setTitle(conversationId, result.title); // Already processed by LumoClient
 }
 
 /**
@@ -90,7 +112,7 @@ export function persistAssistantTurn(
   deps: EndpointDependencies,
   conversationId: ConversationId | undefined,
   message: AssistantMessageData,
-  customToolCalls?: Array<{ name: string; arguments: string; call_id: string }>
+  customToolCalls?: Array<{ name: string; arguments: string; call_id: string }>,
 ): void {
   if (conversationId && deps.conversationStore) {
     // Custom tool calls: skip persistence (client will send back)
@@ -102,11 +124,16 @@ export function persistAssistantTurn(
     deps.conversationStore.appendAssistantResponse(conversationId, message);
   } else {
     // Stateless: track metric only (no persistence)
-    getMetrics()?.messagesTotal.inc({ role: 'assistant' });
+    getMetrics()?.messagesTotal.inc({ role: "assistant" });
   }
 }
 
 // ── ID generation ─────────────────────────────────────────────────
+
+/** Unix epoch seconds — the one clock source for API timestamps. */
+export function nowEpoch(): number {
+  return Math.floor(Date.now() / 1000);
+}
 
 /** Generate a response ID (`resp-xxx`). */
 export function generateResponseId(): string {
@@ -132,7 +159,7 @@ export function generateChatCompletionId(): string {
 
 /** Set standard SSE headers on the response. */
 export function setSSEHeaders(res: Response): void {
-  res.setHeader('Content-Type', 'text/event-stream');
-  res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
+  res.setHeader("Content-Type", "text/event-stream");
+  res.setHeader("Cache-Control", "no-cache");
+  res.setHeader("Connection", "keep-alive");
 }

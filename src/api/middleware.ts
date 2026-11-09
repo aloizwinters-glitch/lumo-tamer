@@ -2,12 +2,32 @@ import type { RequestHandler } from 'express';
 import { logger } from '../app/logger.js';
 import { getMetrics, type MetricsService } from '../app/metrics.js';
 
+function isOpenUiPath(path: string): boolean {
+  return (
+    path === '/health'
+    || path === '/metrics'
+    || path === '/auth'
+    || path.startsWith('/auth/')
+    || path === '/config'
+    || path === '/v1/config'
+    || path === '/v1/restart'
+    || path === '/v1/update'
+    || path === '/logs'
+    || path === '/v1/logs'
+  );
+}
+
+function authUrlFromRequest(req: { protocol?: string; get?: (h: string) => string | undefined }): string {
+  const host = req.get?.('host');
+  if (!host) return '/auth';
+  const proto = req.protocol || 'http';
+  return `${proto}://${host}/auth`;
+}
+
 export function setupAuthMiddleware(apiKey: string): RequestHandler {
   return (req, res, next) => {
-    // Skip auth for health and metrics endpoints.
-    // Note: /health exposes auth status details (method, warnings, last error).
-    // Keep this endpoint on a non-public port if that's a concern.
-    if (req.path === '/health' || req.path === '/metrics') {
+    // /health exposes auth method, warnings, and last refresh error. Keep it off the public internet.
+    if (isOpenUiPath(req.path)) {
       return next();
     }
 
@@ -17,6 +37,23 @@ export function setupAuthMiddleware(apiKey: string): RequestHandler {
       return res.status(401).json({ error: 'Invalid API key' });
     }
     next();
+  };
+}
+
+export function setupReadyMiddleware(isReady: () => boolean): RequestHandler {
+  return (req, res, next) => {
+    if (isOpenUiPath(req.path) || req.path === '/v1/models' || req.path === '/v1/restart' || req.path === '/v1/update' || req.path.startsWith('/v1/models/')) {
+      return next();
+    }
+    if (isReady()) {
+      return next();
+    }
+    return res.status(503).json({
+      error: {
+        message: `Not authenticated. Open ${authUrlFromRequest(req)} in your browser and log in to Proton.`,
+        type: 'auth_required',
+      },
+    });
   };
 }
 
