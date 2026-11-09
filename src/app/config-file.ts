@@ -10,7 +10,7 @@
 
 import { existsSync, statSync, readFileSync, writeFileSync } from 'fs';
 import { parseDocument, parse, Document } from 'yaml';
-import { resolveProjectPath } from './paths.js';
+import { resolveProjectPath, resolveDataPath } from './paths.js';
 
 /**
  * Exit with a fatal error message.
@@ -46,7 +46,7 @@ export interface ConfigFileStatus {
 }
 
 export function getConfigPath(): string {
-  return resolveProjectPath('config.yaml');
+  return resolveDataPath('config.yaml');
 }
 
 /**
@@ -122,6 +122,8 @@ export function updateConfigYaml(updater: (doc: Document) => void): void {
   }
 
   updater(doc);
-  writeFileSync(status.path, doc.toString());
+  // lineWidth: 0 — the default folds long values onto continuation lines,
+  // which breaks sed-based patching and human edits.
+  writeFileSync(status.path, doc.toString({ lineWidth: 0 }));
 }
 

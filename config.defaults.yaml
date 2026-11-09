@@ -1,14 +1,12 @@
 # Authentication configuration
 auth:
-  # - login: enter Proton credentials via go-proton-api
-  # - browser: token extraction via browser
-  # - rclone: paste rclone config
-  # See docs/authentication.md
+  # login = /auth (Proton sign-in or password). browser = sidecar/CDP extract. rclone = paste config.
   method: "login"
 
   # Encrypted vault for secure token storage (AES-256-GCM)
   # Key is stored in OS keychain (desktop) or Docker secret (containers)
   vault:
+    # Relative to LUMO_HOME / --home (defaults to the install directory)
     path: "sessions/vault.enc"
     keychain:
       service: "lumo-tamer"
@@ -29,9 +27,14 @@ auth:
 
   # Browser-specific config (only used when method: browser)
   browser:
-    # Chrome DevTools Protocol endpoint for remote browser
+    # tamer auth browser: launch a Chromium window. Docker sidecar uses launch: false + CDP.
+    launch: false
+    # Persistent profile for the launched window (cookies only, not a browser install)
+    userDataDir: "sessions/browser-profile"
+    # Chrome DevTools Protocol endpoint when launch: false (Docker / already-running Chrome)
     cdpEndpoint: "http://localhost:9222"
-    # use this if you're running both app and browser docker containers:
+    # Docker/Portainer sidecar (tamer has no Chrome). Also set launch: false.
+    # After `tamer auth browser` this is written for you as http://browser:9222
     # cdpEndpoint: "http://browser:9222"
 
   # Login-specific config (only used when method: login)
@@ -47,7 +50,7 @@ test:
   mock:
     # Enable mock mode: bypass authentication, return simulated Lumo responses
     enabled: false
-    # Scenario: success, error, timeout, rejected, toolCall, misroutedToolCall, weeklyLimit, cycle
+    # Scenario: success, error, timeout, rejected, toolCall, misroutedToolCall, historyToolEcho, weeklyLimit, cycle
     scenario: "success"
 
 # Shared Logging Configuration (can be overridden in server/cli sections)
@@ -60,13 +63,15 @@ log:
   filePath: "lumo-tamer.log"
   # Log user/assistant message content (disabled by default to preserve privacy)
   messageContent: false
+  # If set, append one JSON line per Proton API call (no auth headers). Empty = off.
+  dumpApiPath: ""
 
 # Shared Conversations Configuration (can be overridden in server/cli sections)
 # Note: In-memory conversation storage is always active regardless of sync settings
 # - do they still work/make sense with upstream store?
 # - can they still be overwritten for cli/server? (ie. overwriting dbpath doesn't make sense if sync enabled, does it otherwise?)
 conversations:
-  # Path for IndexedDB SQLite files (used when useUpstreamStorage is true)
+  # Path for IndexedDB SQLite files (used when useFallbackStore is false)
   databasePath: "sessions/"
 
   # WORKAROUND for clients without conversation_id support (e.g., Home Assistant).
@@ -76,11 +81,11 @@ conversations:
   deriveIdFromUser: false
 
   # Use fallback in-memory store instead of the primary store
-  # When true, uses the legacy in-memory store (will be removed in future).
-  # When false (default), uses the primary Redux + IndexedDB store.
+  # When true (the default), uses the in-memory store.
+  # When false, uses the primary Redux + IndexedDB store.
   useFallbackStore: true
 
-  # Enable syncing conversations to Proton servers (requires browser auth)
+  # Enable syncing conversations to Proton servers (browser auth, or login that got Lumo scope)
   enableSync: false
   # Project name for conversations (created if doesn't exist)
   projectName: lumo-tamer
@@ -95,6 +100,21 @@ commands:
   # Example: "tamer help" instead of "/help"
   wakeword: "tamer"
 
+# Self-update (GitHub check + Docker socket on this container; no extra updater)
+updates:
+  enabled: true
+  # stable = GitHub latest (main) + GHCR :latest
+  # dev = prereleases + GHCR :dev
+  channel: "stable"
+  repository: "banter240/lumo-tamer"
+  checkIntervalHours: 6
+  autoApply: false
+  # Host docker.sock, bind-mounted into this container (see docker-compose.yml)
+  dockerSocket: "/var/run/docker.sock"
+  # Optional GitHub PAT for release checks (60 -> 5000 req/h). Env GITHUB_TOKEN works too.
+  # Leave empty to use anonymous access (or the GITHUB_TOKEN env var).
+  githubToken: ""
+
 # Server Configuration
 server:
   port: 3003
@@ -104,9 +124,10 @@ server:
 
   # Model tier selection (Lumo 2.0).
   # The inbound OpenAI "model" field picks the tier:
-  #   lumo      -> Proton routes automatically
-  #   lumo-lite -> Lumo 2.0 Lite (fast, everyday)
-  #   lumo-max  -> Lumo 2.0 Max (high-performance)
+  #   lumo       -> Proton routes automatically
+  #   lumo-lite  -> Lumo 2.0 Lite (fast, everyday)
+  #   lumo-max   -> Lumo 2.0 Max (high-performance)
+  #   apertus-15 -> Apertus 1.5
   # Tier used when a request omits the model field (auto = lumo / Proton routes):
   defaultModelTier: "auto"
   # Models advertised on /v1/models and accepted in the "model" field.
@@ -115,21 +136,37 @@ server:
     - "lumo"
     - "lumo-lite"
     - "lumo-max"
+    - "apertus-15"
+
+  # Extra names advertised on /v1/models. Each one maps to a real Lumo tier
+  # and optional thinking. Request reasoning_effort still wins when set.
+  # extraModels:
+  #   - id: lumo-lite-thinking
+  #     model: lumo-lite
+  #     reasoning: high
+  #   - id: lumo-max-reasoning
+  #     model: lumo-max
+  #     reasoning: high
+  extraModels: []
 
   # Thinking / reasoning mode (Lumo 2.0).
   reasoning:
-    # Used when the client does not send reasoning_effort. "none" or "high".
-    # (Inbound reasoning_effort low/medium/high all map to high.)
+    # Used when the client omits reasoning_effort. none = compact/fast.
+    # high = think. lumo-max still thinks when effort is omitted.
     default: "none"
+    # Auto-advertise a `-thinking` variant for every allowedModels entry
+    # (e.g. lumo-max-thinking). Variants pin reasoning to high: they think
+    # even when the client explicitly sends reasoning_effort "none".
+    # Turn off if you want /v1/models to list only what you configured.
+    autoVariants: true
     # Forward Lumo's thinking tokens to the client as delta.reasoning_content
     # (streaming) or message.reasoning_content (non-streaming).
     surfaceThinking: false
 
   # Max request body size
-  # Increase if clients send larger tool/context payloads, but be aware:
-  # 360kb (for a typical request, containing mainly ASCII characters)
-  # translates to roughly 22.5K tokens, which is Lumo's "warning level" on context size.
-  bodyLimit: "360kb"
+  # Covers large coding contexts and base64-encoded image input (vision;
+  # 1mb ≈ ~60k tokens of ASCII, 360kb ≈ Lumo's 22.5K context warning level).
+  bodyLimit: "10mb"
 
   # Prometheus metrics endpoint
   metrics:
@@ -140,19 +177,77 @@ server:
     # Prefix for all metric names
     prefix: "lumo_"
 
-  # Enable Lumo's native web_search tool (and other external tools: weather, stock, cryptocurrency)
+  # Native web_search (and weather, stock, cryptocurrency). Off: Lumo should
+  # not hit the open web unless you ask. On if you want the website extras
+  # (and accept more native/custom tool mix-ups).
   enableWebSearch: false
 
-  # Custom tool detection for API clients
-  # Enable detection of JSON tool calls in Lumo's responses
-  # WARNING: When enabled, Lumo can trigger actions via API clients!
+  # Native image tools: generate_image, edit_image, describe_image (like the
+  # Lumo website). Generated images are streamed back as markdown data URLs
+  # (![lumo:<id>](data:image/png;base64,...)), U2L-decrypted in the proxy.
+  # Counts against your Lumo image allowance. Off unless you want it.
+  enableImageTools: false
+
+  # Honor tools[] from the client (OpenCode, HA, …). Off = ignore client tools.
+  # WARNING: When on, Lumo can trigger actions via those clients.
   customTools:
-    enabled: false
+    enabled: true
 
     # Prefix added to custom tool names to distinguish from Lumo's native tools.
     # Applied to tool definitions sent to Lumo, stripped from tool calls returned to client.
     # Set to "" to disable prefixing.
     prefix: "user:"
+
+    # Instruction modules: optional blocks appended to forTools when enabled.
+    # Use this to add/remove instruction packs (e.g., Home Assistant, MCP servers)
+    # without editing the base forTools template.
+    modules:
+      homeAssistant:
+        enabled: false
+        # {{prefix}} is interpolated at runtime. Do not repeat the base
+        # protocol here — this block is appended to forTools.
+        prompt: |
+          # Home Assistant
+          HA proxy tools (ha_call_read_tool, ha_call_write_tool, ha_call_delete_tool)
+          have their own nested "name" and "arguments". Still wrap everything
+          in the outer protocol "arguments":
+          ```json
+          {"name": "{{prefix}}home-assistant_ha_call_read_tool", "arguments": {"name": "ha_search", "arguments": {"query": "kitchen"}}}
+          ```
+          Outer "arguments" = protocol envelope. Inner "arguments" = HA tool params.
+          - Call ha_get_skill_guide() first: it returns SKILL.md with reference files.
+          - Most other custom tools are NOT listed directly: use ha_search_tools.
+          - Execute discovered tools directly or via ha_call_read/write/delete_tool.
+
+    # Reply recovery: bounce Lumo when it thinks but never emits a tool-call JSON block.
+    recovery:
+      # Bounce replies that end on a dangling colon after announcing an action.
+      bounceDanglingColon: true
+      # Bounce replies that narrate a tool call in prose ("[Assistant tool call]: ...").
+      bounceNarration: true
+      # Bounce replies with no message text at all (thinking-only loops).
+      bounceBlankReply: true
+      # Max total reply length (chars) still eligible for a dangling-colon bounce.
+      danglingColonMaxLength: 2000
+      # Max last-line length (chars) still eligible for a dangling-colon bounce.
+      danglingColonLastLineMaxLength: 500
+
+    # Tool routing: how native Proton tools and custom (JSON) tools coexist.
+    routing:
+      # "auto"    - advertise native tools only when no custom tools are active (recommended)
+      # "always"  - always advertise native tools (pre-fix behavior; can confuse Lumo)
+      # "never"   - never advertise native tools
+      nativeTools: "auto"
+
+  # Prompt token estimation mode for OpenCode compaction.
+  # Proton doesn't report input tokens, so we estimate them to trigger compaction correctly.
+  #   "auto" - UTF-8 bytes / (4/0.435). Factor 1.0 = that baseline
+  #   (equals the old recommended factor 0.3 on the former x1.45 scale).
+  #   "off"  - prompt_tokens = 0 (compaction will not trigger)
+  #   number - raw chars-per-token divisor (no calibration baked in)
+  promptTokenEstimation: "auto"
+  # Fine-tune relative to auto (x0.435 calibration). 1.0 = auto, 0.9 = 90% of auto, 1.1 = 110%.
+  promptTokenEstimationFactor: 1.0
 
 
   instructions:
@@ -177,7 +272,7 @@ server:
       {{/if}}
 
       {{#if tools}}
-      Below are all the custom tools you can use. Remember, all tools prefixed with `{{prefix}}` are custom tools and must be called by outputting the JSON to the user.
+      Below are all the custom tools you can use. Remember, all tools prefixed with `{{prefix}}` are custom tools and must be called by outputting the JSON to the user. Copy each "name" exactly as listed, including `{{prefix}}`. Do not shorten or invent names.
 
       {{tools}}
       {{/if}}
@@ -186,45 +281,101 @@ server:
     # Useful for removing or rewriting phrases that may confuse Lumo about tool calling.
     # Each entry: { pattern: "regex", replacement: "text" } - omit replacement to strip.
     replacePatterns:
-      - pattern: "(?<=(?:(?:native|custom|internal|external)\\s)?)(?=tool)"
-        replacement: "custom "
+      # Rewrite standalone prose mentions of "tool(s)" to "custom tool(s)" so Lumo
+      # separates client tools from its native ones. Identifiers (ha_call_read_tool,
+      # tools.browser.back, tool_name) and qualified phrases (native/custom/internal/
+      # external tool) are left untouched.
+      - pattern: "(?<![\\w.:-])(?<!native\\s)(?<!custom\\s)(?<!internal\\s)(?<!external\\s)\\btools?\\b(?![\\w[(.])"
+        replacement: "custom $&"
 
 
-    # Fallback instructions when no system/developer message is provided in the request
+    # Fallback when the client sends no system prompt (Home Assistant voice, etc.).
+    # Keep this spoken-friendly: Assist reads the reply aloud.
     fallback: |
       Always answer in plain text. Don't use tables, quote blocks, lists, etc. Be concise.
 
     # Instructions prepended when tools are provided in the request.
     # Can use {{prefix}} variable.
+    # Shared by HA Assist tools and coding agents. Keep HA-specific nesting
+    # examples in your own config.yaml, not here.
     forTools: |
       === CUSTOM TOOL PROTOCOL ===
       The tools below are CUSTOM tools, prefixed with `{{prefix}}`.
 
-      IMPORTANT: Custom tools are NOT part of your built-in tool system.
-      You MUST call them by outputting JSON as text in a code block to the user, like this:
+      These tools are reached through this chat channel, not through your
+      built-in function-calling. Call them by outputting JSON as text in a
+      code block to the user, like this:
       ```json
       {"name": "{{prefix}}example_tool", "arguments": {"param": "value"}}
       ```
-      DO NOT try to call custom tools through your internal tool mechanism, it will fail with error:true. If you receive such an error, don't try again with different arguments, but output the JSON as text to the user.
-      DO NOT remove the `{{prefix}}` prefix when calling these tools.
+      example_tool is only the shape. Never call that name.
+      Copy "name" exactly from the tool list below, including `{{prefix}}`.
+      Do not shorten, rename, or invent names.
+      Put every parameter inside "arguments" and match that tool's schema
+      (arrays are JSON arrays [...], objects are {...}). One object per call.
+
+      Emit the JSON code block directly, without narrating or announcing it.
+      For multiple tools, emit multiple code blocks. Always keep the
+      `{{prefix}}` prefix when calling these tools.
+
+      The proxy executes your JSON locally and returns results as
+      [Tool Result: name] in the conversation — this is the normal way tools
+      work in this environment. Act as an agent from the first turn; there is
+      never a need to ask the user to paste file contents.
+
+      Prefer the task tool for isolated work; pick a subagent from that tool's schema.
+      Do the work yourself when it is a few tool calls in this conversation.
 
       The user's system will execute them and return results.
       === END PROTOCOL ===
 
+    # Follow-up turns: same rules, shorter. Tool schemas are still sent in full.
+    forToolsCompact: |
+      Custom tools: JSON in a ```json code block. Copy "name" exactly from the list
+      below (keep `{{prefix}}`). Do not shorten names. Parameters go in "arguments";
+      arrays stay arrays. One object per call.
+      Tools are reached through JSON text in a code block, not through built-in
+      function-calling. The proxy executes the JSON and returns
+      [Tool Result: name]. Emit the code block directly, without announcing it.
+      Isolated work: prefer the task tool (see its schema).
 
-    # Where to inject instructions: "first" or "last" user message to Lumo
-    # - first: inject once into first user message (may reduce token usage in multi-turn conversations,
-    #   but Lumo may "forget" instructions in long conversations)
-    # - last: inject into last user message each request (matches WebClient behaviour, might use more tokens, but instructions always fresh)
+
+    # Where to inject instructions when the request has no client tools.
+    # With tools the proxy always uses "last" so long sessions do not drop the protocol.
+    # - first: inject once into first user message (fewer tokens, may be forgotten)
+    # - last: inject into last user message each request (WebClient behaviour, more tokens)
     injectInto: "first"
 
+
+    # Injected when the client sends response_format json_object / json_schema.
+    # {{schema}} is the JSON Schema or "a JSON object".
+    forJsonFormat: |
+      Respond ONLY with valid JSON matching this schema. No markdown, no code fences, no explanation, no extra keys.
+      Schema:
+      {{schema}}
+
+    # tool_choice: required
+    forToolRequired: |
+      You MUST call at least one custom tool before answering. Do not reply with only text.
+
+    # tool_choice: { type: function, function: { name } }
+    forToolNamed: |
+      You MUST call the custom tool `{{name}}` in this turn. Do not call other tools.
 
     # Bounce instruction sent when Lumo routes a custom tool through its native tool pipeline.
     # The actual tool call JSON is appended at runtime.
     forToolBounce: |
-      You tried to call a custom tool using your built-in tool system, but custom tools must be called by outputting JSON text within a code block. Please output the tool call as JSON, like this:
+      Note: your previous tool call went through your built-in function-calling,
+      which is not connected in this environment — arguments were lost and the
+      call was dropped. Tool calls are JSON text in a ```json code block.
+      Emit the code block directly, without narrating or announcing it.
+      Re-output the tool call now as fenced JSON:
 
-
+    forAnnounceBounce: |
+      Note: your last message ended without emitting a tool call (it either only
+      announced the action, narrated it in prose, or contained no message text at all).
+      Output the tool call now as JSON text in a fenced json code block.
+      Copy "name" exactly from your tool list (keep the prefix), and emit the code block directly.
 
 
 # CLI Configuration
@@ -233,10 +384,10 @@ cli:
     target: "file"
     filePath: "lumo-tamer-cli.log"
 
-  # Enable Lumo's native web_search tool (and other external tools: weather, stock, cryptocurrency)
   enableWebSearch: false
 
-  # Local actions: code block detection and execution
+  enableImageTools: false
+
   localActions:
     # Enable code block detection (```bash, ```read, ```edit, etc.)
     # WARNING: When enabled, Lumo can trigger actions on your machine!
@@ -248,7 +399,7 @@ cli:
       # Note that if this is false, Lumo can still ask to read a file using shell tools (ie. cat)
       enabled: true
       # Max file size. Reading files larger than this fail with an error.
-      # 512kb translates to roughly 32K tokens (Lumo's "warning level" on context size).
+      # 360kb translates to roughly 22.5K tokens (Lumo's "warning level" on context size).
       maxFileSize: "360kb"
 
     # Executors for code block execution
