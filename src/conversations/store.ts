@@ -21,10 +21,13 @@ import { getMetrics } from "../app/metrics.js";
 import type { AssistantMessageData, Turn } from "../lumo-client/types.js";
 
 import {
-  findNewMessages,
-  hashMessage,
-  isValidContinuation,
-} from "./deduplication.js";
+  effectiveSaveTitle,
+  findAppendableMessages,
+  lastMessageId,
+  semanticIdFor,
+  serializeToolCall,
+  turnsFromMessages,
+} from "./append-helpers.js";
 import type {
   ConversationId,
   ConversationState,
@@ -70,9 +73,11 @@ function fromUpstreamMessage(
   semanticIdMap?: Map<string, string>,
 ): Message {
   // Use cached semanticId if available, otherwise compute from content
-  const semanticId =
-    semanticIdMap?.get(msg.id) ??
-    hashMessage(msg.role, msg.content ?? "").slice(0, 16);
+  const semanticId = semanticIdFor(
+    msg.role,
+    msg.content,
+    semanticIdMap?.get(msg.id),
+  );
 
   return {
     ...msg,
@@ -218,41 +223,25 @@ export class ConversationStore {
   appendMessages(id: ConversationId, incoming: MessageForStore[]): Message[] {
     const convState = this.getOrCreate(id);
 
-    // Validate continuation
-    const validation = isValidContinuation(incoming, convState.messages);
-    if (!validation.valid) {
-      getMetrics()?.invalidContinuationsTotal.inc();
-      logger.warn(
-        {
-          conversationId: id,
-          reason: validation.reason,
-          incomingCount: incoming.length,
-          storedCount: convState.messages.length,
-          ...validation.debugInfo,
-        },
-        "Invalid conversation continuation",
-      );
-    }
-
-    // Find new messages
-    const newMessages = findNewMessages(incoming, convState.messages);
-
+    // Find new messages (validate continuation, dedupe)
+    const newMessages = findAppendableMessages(
+      id,
+      incoming,
+      convState.messages,
+    );
     if (newMessages.length === 0) {
-      logger.debug({ conversationId: id }, "No new messages to append");
       return [];
     }
 
     // Convert to Message format and dispatch to Redux
     const now = new Date();
-    const lastMessage = convState.messages[convState.messages.length - 1];
-    let parentId = lastMessage?.id;
+    let parentId = lastMessageId(convState.messages);
 
     const addedMessages: Message[] = [];
 
     for (const msg of newMessages) {
       const messageId = randomUUID();
-      const semanticId =
-        msg.id ?? hashMessage(msg.role, msg.content ?? "").slice(0, 16);
+      const semanticId = semanticIdFor(msg.role, msg.content, msg.id);
 
       // Store semanticId in map for later retrieval
       this.semanticIdMap.set(messageId, semanticId);
@@ -335,9 +324,11 @@ export class ConversationStore {
     const convState = this.getOrCreate(id);
     const now = new Date();
     const messageId = randomUUID();
-    const effectiveSemanticId =
-      semanticId ??
-      hashMessage(Role.Assistant, messageData.content).slice(0, 16);
+    const effectiveSemanticId = semanticIdFor(
+      Role.Assistant,
+      messageData.content,
+      semanticId,
+    );
 
     // Store semanticId in map for later retrieval
     this.semanticIdMap.set(messageId, effectiveSemanticId);
@@ -418,13 +409,12 @@ export class ConversationStore {
     toolCalls: Array<{ name: string; arguments: string; call_id: string }>,
   ): void {
     for (const tc of toolCalls) {
-      const content = JSON.stringify({
-        type: "function_call",
-        call_id: tc.call_id,
-        name: tc.name,
-        arguments: tc.arguments,
-      });
-      this.appendAssistantResponse(id, { content }, "succeeded", tc.call_id);
+      this.appendAssistantResponse(
+        id,
+        { content: serializeToolCall(tc) },
+        "succeeded",
+        tc.call_id,
+      );
     }
   }
 
@@ -435,7 +425,7 @@ export class ConversationStore {
     const convState = this.getOrCreate(id);
     const now = new Date();
     const messageId = randomUUID();
-    const semanticId = hashMessage(Role.User, content).slice(0, 16);
+    const semanticId = semanticIdFor(Role.User, content);
 
     // Store semanticId in map for later retrieval
     this.semanticIdMap.set(messageId, semanticId);
@@ -501,8 +491,7 @@ export class ConversationStore {
     turns: Turn[],
     title?: string,
   ): { conversationId: ConversationId; title: string } {
-    const effectiveTitle =
-      title?.trim().substring(0, 100) || this.generateAutoTitle(turns);
+    const effectiveTitle = effectiveSaveTitle(turns, title);
     const conversationId = deterministicUUID(`save:${effectiveTitle}`);
 
     this.getOrCreate(conversationId);
@@ -555,10 +544,7 @@ export class ConversationStore {
    * Convert conversation to Lumo Turn[] format
    */
   toTurns(id: ConversationId): Turn[] {
-    return this.getMessages(id).map(({ role, content }) => ({
-      role,
-      content: content ?? "",
-    }));
+    return turnsFromMessages(this.getMessages(id));
   }
 
   /**
@@ -656,21 +642,5 @@ export class ConversationStore {
 
   private notifyDirty(): void {
     this.onDirtyCallback?.();
-  }
-
-  private generateAutoTitle(turns: Turn[]): string {
-    const firstUserTurn = turns.find((t) => t.role === Role.User);
-    if (firstUserTurn?.content) {
-      const content = firstUserTurn.content.trim();
-      return content.length > 50 ? content.slice(0, 47) + "..." : content;
-    }
-    const timestamp = new Date().toLocaleString("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    });
-    return `Chat (${timestamp})`;
   }
 }

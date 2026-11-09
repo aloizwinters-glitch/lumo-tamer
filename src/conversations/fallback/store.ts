@@ -18,10 +18,13 @@ import { Role, ConversationStatus } from "@lumo/types.js";
 import type { Turn, AssistantMessageData } from "../../lumo-client/types.js";
 
 import {
-  findNewMessages,
-  hashMessage,
-  isValidContinuation,
-} from "../deduplication.js";
+  effectiveSaveTitle,
+  findAppendableMessages,
+  lastMessageId,
+  semanticIdFor,
+  serializeToolCall,
+  turnsFromMessages,
+} from "../append-helpers.js";
 import { type MessageForStore } from "../types.js";
 import type {
   ConversationId,
@@ -109,45 +112,20 @@ export class FallbackStore {
   appendMessages(id: ConversationId, incoming: MessageForStore[]): Message[] {
     const state = this.getOrCreate(id);
 
-    // Validate continuation
-    const validation = isValidContinuation(incoming, state.messages);
-    if (!validation.valid) {
-      getMetrics()?.invalidContinuationsTotal.inc();
-      logger.warn(
-        {
-          conversationId: id,
-          reason: validation.reason,
-          incomingCount: incoming.length,
-          storedCount: state.messages.length,
-          ...validation.debugInfo,
-        },
-        "Invalid conversation continuation",
-      );
-      // For now, we continue anyway but log the warning
-    }
-
-    // Find new messages
-    const newMessages = findNewMessages(incoming, state.messages);
-
+    const newMessages = findAppendableMessages(id, incoming, state.messages);
     if (newMessages.length === 0) {
-      logger.debug({ conversationId: id }, "No new messages to append");
       return [];
     }
 
     // Convert to Message format and append
     const now = new Date().toISOString();
-    const lastMessageId =
-      state.messages.length > 0
-        ? state.messages[state.messages.length - 1].id
-        : undefined;
 
     const addedMessages: Message[] = [];
-    let parentId = lastMessageId;
+    let parentId = lastMessageId(state.messages);
 
     for (const msg of newMessages) {
       // Use provided ID (for tool messages) or compute hash (for regular messages)
-      const semanticId =
-        msg.id ?? hashMessage(msg.role, msg.content ?? "").slice(0, 16);
+      const semanticId = semanticIdFor(msg.role, msg.content, msg.id);
 
       const message: Message = {
         id: randomUUID(),
@@ -207,10 +185,7 @@ export class FallbackStore {
     const state = this.getOrCreate(id);
     const now = new Date();
 
-    const parentId =
-      state.messages.length > 0
-        ? state.messages[state.messages.length - 1].id
-        : undefined;
+    const parentId = lastMessageId(state.messages);
 
     const message: Message = {
       id: randomUUID(),
@@ -222,9 +197,11 @@ export class FallbackStore {
       content: messageData.content,
       toolCall: messageData.toolCall,
       toolResult: messageData.toolResult,
-      semanticId:
-        semanticId ??
-        hashMessage(Role.Assistant, messageData.content).slice(0, 16),
+      semanticId: semanticIdFor(
+        Role.Assistant,
+        messageData.content,
+        semanticId,
+      ),
     };
 
     state.messages.push(message);
@@ -264,13 +241,12 @@ export class FallbackStore {
     toolCalls: Array<{ name: string; arguments: string; call_id: string }>,
   ): void {
     for (const tc of toolCalls) {
-      const content = JSON.stringify({
-        type: "function_call",
-        call_id: tc.call_id,
-        name: tc.name,
-        arguments: tc.arguments,
-      });
-      this.appendAssistantResponse(id, { content }, "succeeded", tc.call_id);
+      this.appendAssistantResponse(
+        id,
+        { content: serializeToolCall(tc) },
+        "succeeded",
+        tc.call_id,
+      );
     }
   }
 
@@ -281,10 +257,7 @@ export class FallbackStore {
     const state = this.getOrCreate(id);
     const now = new Date();
 
-    const parentId =
-      state.messages.length > 0
-        ? state.messages[state.messages.length - 1].id
-        : undefined;
+    const parentId = lastMessageId(state.messages);
 
     const message: Message = {
       id: randomUUID(),
@@ -294,7 +267,7 @@ export class FallbackStore {
       parentId,
       status: "succeeded",
       content,
-      semanticId: hashMessage(Role.User, content).slice(0, 16),
+      semanticId: semanticIdFor(Role.User, content),
     };
 
     state.messages.push(message);
@@ -327,8 +300,7 @@ export class FallbackStore {
     turns: Turn[],
     title?: string,
   ): { conversationId: ConversationId; title: string } {
-    const effectiveTitle =
-      title?.trim().substring(0, 100) || generateAutoTitle(turns);
+    const effectiveTitle = effectiveSaveTitle(turns, title);
     const conversationId = deterministicUUID(`save:${effectiveTitle}`);
 
     this.getOrCreate(conversationId);
@@ -372,10 +344,7 @@ export class FallbackStore {
    * Convert conversation to Lumo Turn[] format for API call
    */
   toTurns(id: ConversationId): Turn[] {
-    return this.getMessages(id).map(({ role, content }) => ({
-      role,
-      content: content ?? "",
-    }));
+    return turnsFromMessages(this.getMessages(id));
   }
 
   /**
@@ -559,23 +528,6 @@ export class FallbackStore {
  * this uses the first user message truncated to 50 chars.
  * Used for stateless /save where we don't have a Lumo-generated title.
  */
-function generateAutoTitle(turns: Turn[]): string {
-  const firstUserTurn = turns.find((t) => t.role === Role.User);
-  if (firstUserTurn?.content) {
-    const content = firstUserTurn.content.trim();
-    return content.length > 50 ? content.slice(0, 47) + "..." : content;
-  }
-  // Fallback to timestamp if no user message
-  const timestamp = new Date().toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-  return `Chat (${timestamp})`;
-}
-
 // Singleton instance
 let fallbackStoreInstance: FallbackStore | null = null;
 
