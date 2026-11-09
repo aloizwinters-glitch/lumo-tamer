@@ -22,7 +22,10 @@ describe('GET /health', () => {
 
     const body = await res.json();
     expect(body.status).toBe('ok');
+    expect(body.version).toEqual(expect.any(String));
     expect(body.queue).toEqual({ size: 0, pending: 0 });
+    expect(body.auth).toEqual({ available: false });
+    expect(body.update).toMatchObject({ available: expect.any(Boolean), current: expect.any(String) });
   });
 });
 
@@ -42,7 +45,27 @@ describe('GET /v1/models', () => {
     const res = await fetch(`${ts.baseUrl}/v1/models`);
     const body = await res.json();
     const ids = body.data.map((m: { id: string }) => m.id);
-    // Defaults from config.defaults.yaml
-    expect(ids).toEqual(['lumo', 'lumo-lite', 'lumo-max']);
+    // Built-ins from config.defaults.yaml come first (in order).
+    expect(ids.slice(0, 4)).toEqual(['lumo', 'lumo-lite', 'lumo-max', 'apertus-15']);
+    // Every allowed model gets a -thinking variant, either auto-generated
+    // (reasoning.autoVariants) or from local extraModels — order varies.
+    for (const id of ['lumo-thinking', 'lumo-lite-thinking', 'lumo-max-thinking', 'apertus-15-thinking']) {
+      expect(ids).toContain(id);
+    }
+  });
+});
+
+describe('GET /v1/models/:id', () => {
+  it('returns a single advertised model', async () => {
+    const res = await fetch(`${ts.baseUrl}/v1/models/lumo-max`);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.id).toBe('lumo-max');
+    expect(body.owned_by).toBe('proton');
+  });
+
+  it('returns 404 for an unknown model', async () => {
+    const res = await fetch(`${ts.baseUrl}/v1/models/gpt-4`);
+    expect(res.status).toBe(404);
   });
 });
