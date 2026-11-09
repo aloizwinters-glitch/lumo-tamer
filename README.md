@@ -243,6 +243,8 @@ cli:
   enableWebSearch: true
 ```
 
+In plain chat these tools are always offered. On agent requests (the client sends its own tools, e.g. OpenCode), they are only offered when the latest user message asks for something online ("search the web", "latest version of…", news, weather, stock prices, bitcoin). They are never offered on title/compaction requests or bounces, so tool-loop steps don't trigger off-topic searches. Each agent request that offers them logs `Offering web search tools on this agent request`.
+
 ### Model Tiers and Thinking Mode
 
 lumo-tamer maps standard OpenAI request fields to Lumo 2.0's model tier and answer mode:

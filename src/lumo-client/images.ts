@@ -305,6 +305,19 @@ export function selectImageTools(turns: Turn[], instructions?: string): ToolName
     return [...tools];
 }
 
+/**
+ * Text of the last real user message, or null on agent helper requests (title,
+ * compaction) and when there is none. Tool-result turns are skipped.
+ */
+export function latestUserRequestText(turns: Turn[], instructions?: string): string | null {
+    if (instructions && HELPER_REQUEST_RE.test(instructions)) return null;
+    let g = turns.length - 1;
+    while (g >= 0 && !isGenuineUserTurn(turns[g])) g--;
+    if (g < 0) return null;
+    const text = (turns[g].content ?? '').replace(MARKER_RE, ' ');
+    return HELPER_REQUEST_RE.test(text) ? null : text;
+}
+
 /** Whether any image tool would be advertised on this request. */
 export function shouldOfferImageTools(turns: Turn[], instructions?: string): boolean {
     return selectImageTools(turns, instructions).length > 0;
