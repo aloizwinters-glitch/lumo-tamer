@@ -1,7 +1,11 @@
 services:
 
   tamer:
+    # Pin the tag in .env (see .env.example). Git branch on the host does not matter.
+    # First boot: if GHCR is empty, `build: .` is the fallback.
+    image: ${LUMO_TAMER_IMAGE:-ghcr.io/banter240/lumo-tamer:latest}
     build: .
+    pull_policy: missing
     container_name: lumo-tamer
     ports:
       - "3003:3003"
@@ -10,16 +14,35 @@ services:
       # Docker creates a directory if the file doesn't exist, causing errors.
       - ./config.yaml:/app/config.yaml
       - ./sessions:/app/sessions
+      # Self-update (Settings → Updates / tamer update apply). Root-equivalent
+      # on the host — only on a private box. See docs/updates.md.
+      - /var/run/docker.sock:/var/run/docker.sock
     secrets:
       - lumo-vault-key
     environment:
       - NODE_ENV=production
+      # Keep config.yaml + sessions on the mounted /app (same as before).
+      - LUMO_HOME=/app
+      # So Updates knows which GHCR tag this container is pinned to.
+      - LUMO_TAMER_IMAGE=${LUMO_TAMER_IMAGE:-ghcr.io/banter240/lumo-tamer:latest}
+      - LUMO_CONTAINER_NAME=lumo-tamer
     restart: unless-stopped
 
-  # Optional: Browser service
-  # Only needed when using "browser" auth method and you can't use your own browser.
-  # Runs Chromium with CDP enabled, UI accessible via :3001
+  # Optional Chromium+noVNC (~1 GB). Not started by a normal `compose up`.
+  # Prefer http://<host>:3003/auth. Start this only when Proton blocks
+  # password login (CAPTCHA / 2028) or you need a hardware key:
+  #   docker compose --profile browser up -d browser
+  #   open http://<host>:3001  -> lumo.proton.me
+  #   docker compose run --rm -it tamer auth browser   # CDP http://browser:9222
+  #   # writes auth.browser.launch: false + cdpEndpoint (not localhost)
+  #   docker compose --profile browser stop browser
+  #   docker compose --profile browser rm -f browser
+  # Optional image + profile wipe (tamer / port 3003 stays up):
+  #   docker rmi $(docker images -q --filter reference='*lumo-tamer*browser*')
+  #   # rm -rf ./browser-data
+  #   docker ps -a --filter name=lumo-tamer-browser   # empty = gone
   browser:
+    profiles: ["browser"]
     # image: lscr.io/linuxserver/chromium:latest
     build:
       context: .
@@ -46,12 +69,13 @@ services:
 
   # Optional: Open WebUI for testing
   open-webui:
+    profiles: ["webui"]
     image: ghcr.io/open-webui/open-webui:main-slim
     container_name: open-webui
     # Read apiKey from config.yaml at startup and export as OPENAI_API_KEYS env var
     entrypoint: ["/bin/bash", "-c", "export OPENAI_API_KEYS=$(grep 'apiKey:' /app/config.yaml | head -1 | sed 's/.*apiKey: *\"\\{0,1\\}//;s/\".*//') && exec /app/backend/start.sh"]
     ports:
-      - "8080:8080"
+      - "3080:8080"
     environment:
       - OPENAI_API_BASE_URLS=http://tamer:3003/v1
       - ENABLE_OPENAI_API=true
