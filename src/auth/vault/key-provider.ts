@@ -9,7 +9,8 @@
  * to avoid the "key taped to the door" anti-pattern.
  */
 
-import { existsSync, readFileSync, statSync } from 'fs';
+import { existsSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'fs';
+import { dirname } from 'path';
 import { randomBytes } from 'crypto';
 import { logger } from '../../app/logger.js';
 import { authConfig } from '../../app/config.js';
@@ -101,15 +102,20 @@ export async function getVaultKey(config: VaultKeyConfig = getDefaultKeyConfig()
             logger.debug({ source: 'file', path: config.keyFilePath }, 'Vault key loaded from file');
             return cachedKey;
         } catch (err) {
+            const reason = err instanceof Error ? err.message : String(err);
             logger.debug({ err }, `Failed to read key file ${config.keyFilePath}`);
+            throw new Error(`Vault key file ${config.keyFilePath} could not be used: ${reason}`);
         }
     }
 
-    // No secure source available
+    // No secure source available — this happens on first run or when Docker missing key file
+    // Return a soft error that will be caught by Application.create()
     throw new Error(
         'No secure key storage available.\n' +
         '- Desktop: Install system keychain (gnome-keyring, macOS Keychain, Windows Credential Manager)\n' +
-        `- Docker: Mount a secret at ${config.keyFilePath}\n`
+        `- Docker: Mount a secret at ${config.keyFilePath}\n` +
+        `- Missing key file: Docker automatically created a directory instead. Remove and recreate ${config.keyFilePath}\n` +
+        `Solution: rm -rf ${config.keyFilePath}, mkdir -p $(dirname ${config.keyFilePath}), then mount secret or run again`
     );
 }
 
@@ -138,6 +144,23 @@ export async function setVaultKey(key: Buffer, config: VaultKeyConfig = getDefau
  */
 export function generateVaultKey(): Buffer {
     return randomBytes(32);
+}
+
+/**
+ * Write a new 32-byte key to keyFilePath (0600). Used when there is no
+ * keychain and the file is missing — first login / vault reset.
+ */
+export function writeNewKeyFile(config: VaultKeyConfig = getDefaultKeyConfig()): Buffer {
+    const key = generateVaultKey();
+    const dir = dirname(config.keyFilePath);
+    if (!existsSync(dir)) {
+        mkdirSync(dir, { recursive: true });
+    }
+    writeFileSync(config.keyFilePath, key, { mode: 0o600 });
+    cachedKey = key;
+    cachedSource = 'file';
+    logger.warn({ path: config.keyFilePath }, 'Created a new vault key file');
+    return key;
 }
 
 /**

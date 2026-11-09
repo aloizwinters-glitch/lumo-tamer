@@ -9,11 +9,13 @@
  * Inspired by proton-bridge vault implementation.
  */
 
-import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, statSync, renameSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, unlinkSync, mkdirSync, statSync, renameSync, realpathSync } from 'fs';
 import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 import { dirname } from 'path';
 import { logger } from '../../app/logger.js';
-import { getVaultKey, setVaultKey, generateVaultKey, isKeychainAvailable, isKeyFileAvailable, type VaultKeyConfig } from './key-provider.js';
+import { authConfig } from '../../app/config.js';
+import { resolveDataPath } from '../../app/paths.js';
+import { getVaultKey, setVaultKey, generateVaultKey, writeNewKeyFile, isKeychainAvailable, isKeyFileAvailable, defaultKeyConfig, type VaultKeyConfig } from './key-provider.js';
 import type { StoredTokens } from '../types.js';
 
 const ALGORITHM = 'aes-256-gcm';
@@ -23,6 +25,13 @@ const AUTH_TAG_LENGTH = 16;
 export interface VaultConfig {
     path: string;
     keyConfig: VaultKeyConfig;
+}
+
+export function configuredVault(): { vaultPath: string; keyConfig: VaultKeyConfig } {
+    return {
+        vaultPath: resolveDataPath(authConfig.vault.path),
+        keyConfig: defaultKeyConfig(),
+    };
 }
 
 /**
@@ -121,14 +130,24 @@ export async function writeVault(vaultPath: string, tokens: StoredTokens, keyCon
         );
     }
 
-    // Atomic write: write to temp file, then rename
-    const tempPath = `${vaultPath}.tmp`;
+    // Atomic write: write to temp file, then rename. Resolve symlinks
+    // first — renaming over a symlink would replace the link with a real
+    // file, silently breaking shared-vault setups (slots linking to one
+    // master vault).
+    let targetPath = vaultPath;
+    try {
+      if (existsSync(vaultPath)) targetPath = realpathSync(vaultPath);
+    } catch {
+      // Broken link or unreadable target: write over the link itself, same as before.
+    }
+
+    const tempPath = `${targetPath}.tmp`;
     writeFileSync(tempPath, ciphertext, { mode: 0o600 });
 
     // Rename (atomic on most filesystems)
-    renameSync(tempPath, vaultPath);
+    renameSync(tempPath, targetPath);
 
-    logger.debug({ vaultPath }, 'Tokens written to vault');
+    logger.debug({ vaultPath: targetPath }, 'Tokens written to vault');
 }
 
 /**
@@ -160,22 +179,23 @@ export async function ensureVaultKey(keyConfig?: VaultKeyConfig): Promise<Buffer
         return key;
     }
 
-    // Check if key file exists (user must have pre-created it)
     if (isKeyFileAvailable(keyConfig)) {
-        // Key file exists but getVaultKey failed - something is wrong with the file
         throw new Error(
             'Key file exists but is invalid. Ensure it contains exactly 32 bytes (or base64 encoded).\n' +
-            'Generate with: openssl rand -base64 32 > /path/to/key'
+            'Generate with: openssl rand 32 > /path/to/key'
         );
     }
 
-    // No secure storage available
-    throw new Error(
-        'Cannot generate vault key: no secure storage available.\n' +
-        '- Desktop: Install system keychain (gnome-keyring, macOS Keychain, Windows Credential Manager)\n' +
-        '- Docker: Create a secret with: openssl rand 32 > secrets/vault-key\n' +
-        '  Then mount it at /run/secrets/lumo-vault-key in docker-compose.yml'
-    );
+    try {
+        return writeNewKeyFile(keyConfig);
+    } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        throw new Error(
+            `Cannot generate vault key: no keychain, and could not write ${keyConfig?.keyFilePath ?? 'key file'} (${reason}).\n` +
+            '- Desktop: Install system keychain (gnome-keyring, macOS Keychain, Windows Credential Manager)\n' +
+            '- Docker: Mount a 32-byte secret at auth.vault.keyFilePath (see docker-compose.yml)'
+        );
+    }
 }
 
 /**
