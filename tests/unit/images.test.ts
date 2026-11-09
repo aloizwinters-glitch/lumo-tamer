@@ -94,27 +94,46 @@ describe('shouldOfferImageTools', () => {
     const toolResult = user('[Tool Result: bash]\nok');
 
     it('offers tools when the user asks for a picture', () => {
-        expect(shouldOfferImageTools([user('Dessine-moi un chat roux')])).toBe(true);
-        expect(shouldOfferImageTools([user('génère une image de montagne')])).toBe(true);
-        expect(shouldOfferImageTools([user('make a logo for my app')])).toBe(true);
+        for (const text of [
+            'Dessine-moi un chat roux', 'génère une image de montagne', 'Peux-tu me créer un logo ?',
+            'make a logo for my app', 'Create an app icon', 'draw a cat',
+            'Pinta un gato', 'Male einen Hund', 'genera un\'immagine di un cane',
+        ]) {
+            expect(shouldOfferImageTools([user(text)]), text).toBe(true);
+        }
     });
 
-    it('does not offer tools for ordinary requests', () => {
-        expect(shouldOfferImageTools([user('Corrige le bug dans server.ts')])).toBe(false);
-        expect(shouldOfferImageTools([user('lance les tests')])).toBe(false);
+    it('does not offer tools for ordinary requests or mere mentions of images', () => {
+        for (const text of [
+            'Corrige le bug dans server.ts', 'lance les tests',
+            'Pourquoi cette image ne s\'affiche pas dans le README ?', 'update the docker image',
+            'crée une image docker pour le projet', 'the avatar component crashes',
+        ]) {
+            expect(shouldOfferImageTools([user(text)]), text).toBe(false);
+        }
     });
 
-    it('offers tools when the user attaches an image', () => {
-        expect(shouldOfferImageTools([user('<lumo-image id="1" source="user" />', [img('1')])])).toBe(true);
+    it('offers tools when the user attaches an image, even with neutral text', () => {
+        expect(shouldOfferImageTools([user('ok', [img('1')])])).toBe(true);
     });
 
     it('ignores image markers when looking for intent', () => {
+        expect(shouldOfferImageTools([user('<lumo-image id="1" source="user" /> ok')])).toBe(false);
+    });
+
+    it('never offers tools on title / compaction requests', () => {
+        expect(shouldOfferImageTools([user('dessine un chat')], 'You are a title generator. You output ONLY a thread title. Nothing else.')).toBe(false);
+        const history = [user('dessine un chat'), asst('<lumo-image id="a" source="assistant" />', [img('a')])];
+        expect(shouldOfferImageTools([...history, user('You MUST summarize the conversation above into a structured summary.')])).toBe(false);
+    });
+
+    it('does not offer tools just because an older image is in the history', () => {
         expect(shouldOfferImageTools([
-            user('<lumo-image id="1" source="user" />', [img('1')]),
-            asst('a cat'),
-            user('ok'),
-            asst('```json\n{}\n```'),
-            toolResult,
+            user('dessine un chat'),
+            asst('<lumo-image id="a" source="assistant" />', [img('a')]),
+            user('merci'),
+            asst('De rien !'),
+            user('corrige le bug dans server.ts'),
         ])).toBe(false);
     });
 

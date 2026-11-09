@@ -190,18 +190,37 @@ export async function encryptTurnImages<T extends Turn>(turns: T[], encryption: 
     );
 }
 
-/** Words that signal the user wants a picture made (fr/en/es/de/it/pt). */
-const IMAGE_INTENT_RE = new RegExp(
-    '(?<!\\p{L})(?:' + [
-        'images?', 'img', 'pictures?', 'pics?', 'photos?', 'fotos?',
-        'illustr\\p{L}*', 'dessin\\p{L}*', 'dessine\\p{L}*', 'draw\\p{L}*', 'drew',
-        'sketch\\p{L}*', 'croquis', 'peins', 'peindre', 'peinture\\p{L}*', 'paint\\p{L}*',
-        'logos?', 'wallpapers?', "fonds? d['’]\\s?écran", 'posters?', 'affiches?',
-        'portraits?', 'avatars?', 'artwork', 'imagen\\p{L}*', 'imagem\\p{L}*', 'immagin\\p{L}*',
-        'bild\\p{L}*', 'zeichne\\p{L}*', 'dibuj\\p{L}*', 'disegn\\p{L}*', 'desenh\\p{L}*',
-    ].join('|') + ')(?!\\p{L})',
-    'iu',
-);
+const words = (list: string[]) => '(?<!\\p{L})(?:' + list.join('|') + ')(?!\\p{L})';
+
+/** Verbs that ask for a picture on their own ("dessine un chat", "draw a cat"). */
+const DRAW_VERBS = [
+    'dessine\\p{L}*', 'dessiner', 'draw', 'draws', 'drawing', 'drew', 'sketch\\p{L}*',
+    'illustre\\p{L}*', 'illustrate\\p{L}*', 'peins', 'peignez', 'peindre', 'paint', 'paints', 'painting',
+    'pinta\\p{L}*', 'pinte\\p{L}*', 'malen', 'male(?=\\s+(?:ein|mir))', 'zeichne\\p{L}*',
+    'dibuj\\p{L}*', 'disegna\\p{L}*', 'desenh\\p{L}*',
+];
+
+/** Verbs that ask for a picture when an image noun follows ("génère une image"). */
+const CREATE_VERBS = [
+    'g[ée]n[èée]r\\p{L}*', 'cr[ée]e[rsz]?', 'fais', 'faites', 'faire', 'imagine\\p{L}*', 'produi\\p{L}*',
+    'make', 'makes', 'create\\p{L}*', 'generate\\p{L}*', 'design\\p{L}*', 'render',
+    'genera\\p{L}*', 'crea\\p{L}*', 'haz', 'erstell\\p{L}*', 'generier\\p{L}*', 'mach\\p{L}*', 'gera\\p{L}*', 'cria\\p{L}*', 'fa[cç]a',
+];
+
+const IMAGE_NOUNS = [
+    'images?', 'img', 'pictures?', 'pics?', 'photos?', 'fotos?', 'illustrations?', 'dessins?', 'drawings?',
+    'paintings?', 'peintures?', 'sketch(?:es)?', 'logos?', 'ic[oô]nes?', 'icons?', 'wallpapers?',
+    "fonds? d['’]\\s?[ée]cran", 'posters?', 'affiches?', 'portraits?', 'avatars?', 'artwork',
+    'imagen(?:es)?', 'imagens?', 'immagin[ei]', 'bild(?:er)?', 'disegno', 'dibujo', 'desenho',
+];
+
+const DRAW_RE = new RegExp(words(DRAW_VERBS), 'iu');
+const CREATE_IMAGE_RE = new RegExp(words(CREATE_VERBS) + '[^.?!\\n]{0,40}?' + words(IMAGE_NOUNS), 'iu');
+/** "docker image", "image de base"...: not pictures. */
+const NOT_A_PICTURE_RE = /(?:docker|container|conteneur|oci|disk|disque|iso|vm|base|os|system|syst[eè]me)\s+images?|images?\s+(?:docker|de\s+base|disque|iso|du\s+conteneur)/giu;
+
+/** Agent background requests (OpenCode title generation, compaction) must never draw. */
+const HELPER_REQUEST_RE = /title generator|thread title|generate a (?:short )?title|summari[sz]e the conversation|structured summary|existing checkpoint/i;
 
 const MARKER_RE = /<lumo-image\b[^>]*\/>|\[Image omitted:[^\]]*\]/g;
 const TOOL_RESULT_PREFIX = '[Tool Result:';
@@ -210,35 +229,46 @@ function isGenuineUserTurn(turn: Turn): boolean {
     return turn.role === Role.User && !(turn.content ?? '').startsWith(TOOL_RESULT_PREFIX);
 }
 
+const hasImages = (t: Turn | undefined) => (t?.images?.length ?? 0) > 0;
+
+/** True if the text asks for a picture to be made. */
+export function asksForImage(text: string): boolean {
+    const clean = text.replace(MARKER_RE, ' ').replace(NOT_A_PICTURE_RE, ' ');
+    return DRAW_RE.test(clean) || CREATE_IMAGE_RE.test(clean);
+}
+
 /**
  * Whether to advertise Lumo's image tools on this request.
  *
  * The web client only talks to Lumo with a human typing, but agent clients (OpenCode)
- * send many requests per user message: every tool-loop step, bounces, a huge system
- * prompt. Offering generate_image on all of them makes Lumo draw images nobody asked
- * for. So the tools are only offered when:
- * - the last real user message attached images, or asks for a picture, or follows up
- *   on a conversation that already has images (e.g. "make it blue");
- * - and no image was generated since that message (no re-drawing on tool-loop steps).
+ * send many requests per user message: tool-loop steps, bounces, title generation,
+ * compaction. Offering generate_image on all of them makes Lumo draw images nobody
+ * asked for. So the tools are only offered when the last real user message:
+ * - attached an image, or
+ * - asks for a picture to be made, or
+ * - directly answers an assistant message that showed an image ("make it blue"),
+ * and never on helper requests (title / summary), nor again on tool-loop steps once
+ * an image was generated after that message.
  */
-export function shouldOfferImageTools(turns: Turn[]): boolean {
+export function shouldOfferImageTools(turns: Turn[], instructions?: string): boolean {
+    if (instructions && HELPER_REQUEST_RE.test(instructions)) return false;
+
     let g = turns.length - 1;
     while (g >= 0 && !isGenuineUserTurn(turns[g])) g--;
     if (g < 0) return false;
 
-    const after = turns.slice(g + 1);
-    if (after.some((t) => t.role === Role.Assistant && (t.images?.length ?? 0) > 0)) return false;
-
     const user = turns[g];
-    if ((user.images?.length ?? 0) > 0) return true;
+    const text = user.content ?? '';
+    if (HELPER_REQUEST_RE.test(text)) return false;
+    if (turns.slice(g + 1).some((t) => t.role === Role.Assistant && hasImages(t))) return false;
 
-    const text = (user.content ?? '').replace(MARKER_RE, ' ');
-    if (IMAGE_INTENT_RE.test(text)) return true;
+    if (hasImages(user)) return true;
+    if (asksForImage(text)) return true;
 
-    // Follow-up on an existing image ("make it blue"): only when this is the user's own
-    // turn, not a later step of a tool loop.
+    // Follow-up edit: the user's own latest turn, right after an image was shown.
     const latestIsUser = g === turns.length - 1;
-    return latestIsUser && turns.slice(0, g).some((t) => (t.images?.length ?? 0) > 0);
+    const previous = turns[g - 1];
+    return latestIsUser && previous?.role === Role.Assistant && hasImages(previous);
 }
 
 /** Safety net: true if any image would be sent in plaintext. */

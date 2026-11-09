@@ -418,12 +418,15 @@ export class LumoClient {
                 } `);
         }
 
+        // Never on bounces; otherwise only when this turn is about images.
+        const offerImageTools = getEnableImageTools() && !isBounce && shouldOfferImageTools(turns, instructions);
+        if (offerImageTools) logger.info('Offering image tools on this request');
+
         // Read from config - applies to both server and CLI modes
         const tools = selectNativeTools({
             includeInternal: useNativeTools,
             webSearch: getEnableWebSearch(),
-            // Never on bounces; otherwise only when this turn is about images.
-            imageTools: getEnableImageTools() && !isBounce && shouldOfferImageTools(turns),
+            imageTools: offerImageTools,
         });
 
         // Inject instructions at the last moment (kept out of persisted turns).
