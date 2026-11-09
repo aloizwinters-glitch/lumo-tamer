@@ -19,14 +19,13 @@ import { createStreamingToolProcessor } from "../../tools/streaming-processor.js
 import { extractClientToolNames } from "../../tools/prefix.js";
 import {
   buildRequestContext,
-  persistTitle,
-  persistAssistantTurn,
   generateResponseId,
   generateItemId,
   mapToolCallsForPersistence,
   tryExecuteCommand,
   setSSEHeaders,
   nowEpoch,
+  runCompletionAndPersist,
   type ToolCallForPersistence,
 } from "../shared.js";
 import {
@@ -285,40 +284,28 @@ export async function handleRequest(
     };
 
     try {
-      const result = await deps.queue.add(async () =>
-        deps.lumoClient!.chatWithHistory(turns, processor.onChunk, {
-          requestTitle: ctx.requestTitle,
+      const result = await runCompletionAndPersist(
+        deps,
+        ctx,
+        conversationId,
+        turns,
+        processor,
+        {
           instructions,
           injectInstructionsInto,
           modelTier: tier,
           enableReasoning,
           onReasoning: surfaceThinking ? emitReasoning : undefined,
-          coachAnnounceWithoutTool: ctx.hasCustomTools,
-          useNativeTools: !ctx.hasCustomTools,
-        }),
+        },
       );
 
-      logger.debug("[Server] Stream completed");
       if (surfaceThinking && !streaming && result.reasoning) {
         reasoningText = result.reasoning;
         reasoningItemId = reasoningItemId || generateItemId();
       }
-      processor.finalize();
-      persistTitle(result, deps, conversationId);
       toolCallsForPersist = mapToolCallsForPersistence(
         processor.toolCallsEmitted,
       );
-
-      persistAssistantTurn(
-        deps,
-        conversationId,
-        result.message,
-        toolCallsForPersist,
-      );
-      getMetrics()?.lumoCompletionsTotal.inc({
-        tier,
-        reasoning: enableReasoning ? "true" : "false",
-      });
       completionTokens = result.usage?.completion_tokens;
     } catch (error) {
       logger.error({ error }, "Response error");

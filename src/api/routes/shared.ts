@@ -3,6 +3,7 @@ import type { Response } from "express";
 import { getCustomToolsConfig } from "../../app/config.js";
 import { shouldRequestTitle } from "../request-prep.js";
 import { getMetrics } from "../../app/metrics";
+import { logger } from "../../app/logger.js";
 import type { CommandContext } from "../../app/commands.js";
 import type {
   EndpointDependencies,
@@ -14,7 +15,9 @@ import type {
   ChatResult,
   AssistantMessageData,
   LumoUsage,
+  Turn,
 } from "../../lumo-client/index.js";
+import type { LumoModelTier } from "../../lumo-client/types.js";
 import type { OpenAIChatResponse } from "../types.js";
 
 // Re-export for convenience
@@ -85,6 +88,55 @@ export function buildRequestContext(
 }
 
 // ── Persistence helpers ────────────────────────────────────────────
+
+/** Run the queued completion and persist title + assistant turn.
+ * Shared by both OpenAI routes; emit/error shaping stays with the callers. */
+export async function runCompletionAndPersist(
+  deps: EndpointDependencies,
+  ctx: RequestContext,
+  conversationId: ConversationId | undefined,
+  turns: Turn[],
+  processor: {
+    onChunk: (c: string) => void;
+    finalize(): void;
+    toolCallsEmitted: OpenAIToolCall[];
+  },
+  options: {
+    instructions?: string;
+    injectInstructionsInto?: "first" | "last";
+    modelTier: LumoModelTier;
+    enableReasoning: boolean;
+    onReasoning?: (content: string) => void;
+  },
+): Promise<ChatResult> {
+  const result = await deps.queue.add(async () =>
+    deps.lumoClient!.chatWithHistory(turns, processor.onChunk, {
+      requestTitle: ctx.requestTitle,
+      instructions: options.instructions,
+      injectInstructionsInto: options.injectInstructionsInto,
+      modelTier: options.modelTier,
+      enableReasoning: options.enableReasoning,
+      onReasoning: options.onReasoning,
+      coachAnnounceWithoutTool: ctx.hasCustomTools,
+      useNativeTools: !ctx.hasCustomTools,
+    }),
+  );
+
+  logger.debug("[Server] Stream completed");
+  processor.finalize();
+  persistTitle(result, deps, conversationId);
+  persistAssistantTurn(
+    deps,
+    conversationId,
+    result.message,
+    mapToolCallsForPersistence(processor.toolCallsEmitted),
+  );
+  getMetrics()?.lumoCompletionsTotal.inc({
+    tier: options.modelTier,
+    reasoning: options.enableReasoning ? "true" : "false",
+  });
+  return result;
+}
 
 /** Persist title if Lumo generated one. No-op for stateless requests. */
 export function persistTitle(

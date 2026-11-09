@@ -24,14 +24,12 @@ import { createStreamingToolProcessor } from "../../tools/streaming-processor.js
 import { extractClientToolNames } from "../../tools/prefix.js";
 import {
   buildRequestContext,
-  persistTitle,
-  persistAssistantTurn,
   generateChatCompletionId,
-  mapToolCallsForPersistence,
   tryExecuteCommand,
   setSSEHeaders,
   toOpenAIChatUsage,
   nowEpoch,
+  runCompletionAndPersist,
 } from "../shared.js";
 import {
   conversationIdFromUserField,
@@ -282,9 +280,13 @@ async function handleChatRequest(
   } else {
     // Normal flow: call Lumo
     try {
-      const result = await deps.queue.add(async () =>
-        deps.lumoClient!.chatWithHistory(turns, processor.onChunk, {
-          requestTitle: ctx.requestTitle,
+      const result = await runCompletionAndPersist(
+        deps,
+        ctx,
+        conversationId,
+        turns,
+        processor,
+        {
           instructions,
           injectInstructionsInto,
           modelTier: tier,
@@ -293,32 +295,16 @@ async function handleChatRequest(
             surfaceThinking && emitter
               ? (text) => emitter.emitReasoningDelta(text)
               : undefined,
-          coachAnnounceWithoutTool: ctx.hasCustomTools,
-          useNativeTools: !ctx.hasCustomTools,
-        }),
+        },
       );
 
-      logger.debug("[Server] Stream completed");
       if (surfaceThinking && !streaming && result.reasoning) {
         reasoningContent = result.reasoning;
       }
-      processor.finalize();
-      persistTitle(result, deps, conversationId);
       toolCalls =
         processor.toolCallsEmitted.length > 0
           ? processor.toolCallsEmitted
           : undefined;
-
-      persistAssistantTurn(
-        deps,
-        conversationId,
-        result.message,
-        mapToolCallsForPersistence(processor.toolCallsEmitted),
-      );
-      getMetrics()?.lumoCompletionsTotal.inc({
-        tier,
-        reasoning: enableReasoning ? "true" : "false",
-      });
       usage = toOpenAIChatUsage(result.usage);
     } catch (error) {
       logger.error({ error }, "Chat completion error");
