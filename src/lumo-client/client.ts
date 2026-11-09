@@ -38,6 +38,7 @@ import {
 } from "./v2-body.js";
 import { V2StreamProcessor } from "./v2-stream.js";
 import { selectNativeTools } from "./native-tools.js";
+import { asksForWeb } from "./web-intent.js";
 import {
   getInstructionsConfig,
   getServerInstructionsConfig,
@@ -70,7 +71,7 @@ import {
   limitImages,
   lumoImageMarker,
   stripImages,
-  shouldOfferImageTools,
+  selectImageTools,
 } from "./images.js";
 
 // Re-export types for external consumers
@@ -528,13 +529,30 @@ export class LumoClient {
       );
     }
 
+    // Never on bounces; otherwise only when this turn is about images.
+    const offerImageTools =
+      getEnableImageTools() && !isBounce
+        ? selectImageTools(turns, instructions)
+        : [];
+    if (offerImageTools.length > 0)
+      logger.info(
+        { tools: offerImageTools },
+        "Offering image tools on this request",
+      );
+
+    // Web tools: always in plain chat; in agent mode (client tools, useNativeTools
+    // false) only when the user asks for something online, never on bounces.
+    const offerWebTools =
+      getEnableWebSearch() &&
+      (useNativeTools || (!isBounce && asksForWeb(turns, instructions)));
+    if (offerWebTools && !useNativeTools)
+      logger.info("Offering web search tools on this agent request");
+
     // Read from config - applies to both server and CLI modes
     const tools = selectNativeTools({
       includeInternal: useNativeTools,
-      webSearch: getEnableWebSearch(),
-      // Never on bounces; otherwise only when this turn is about images.
-      imageTools:
-        getEnableImageTools() && !isBounce && shouldOfferImageTools(turns),
+      webSearch: offerWebTools,
+      imageTools: offerImageTools,
     });
 
     // Inject instructions at the last moment (kept out of persisted turns).
