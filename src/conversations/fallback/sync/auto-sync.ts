@@ -10,10 +10,10 @@
  * (see ~/WebClients/applications/lumo/src/app/redux/sagas/conversations.ts)
  */
 
-import { AUTO_SYNC } from '../../../app/const.js';
-import { logger } from '../../../app/logger.js';
-import { getSyncService, type SyncService } from './sync-service.js';
-import { getMetrics } from '../../../app/metrics.js';
+import { AUTO_SYNC } from "../../../app/const.js";
+import { logger } from "../../../app/logger.js";
+import { getSyncService, type SyncService } from "./sync-service.js";
+import { getMetrics } from "../../../app/metrics.js";
 
 const { DEBOUNCE_MS, MIN_INTERVAL_MS, MAX_DELAY_MS } = AUTO_SYNC;
 
@@ -28,214 +28,227 @@ const { DEBOUNCE_MS, MIN_INTERVAL_MS, MAX_DELAY_MS } = AUTO_SYNC;
  * 4. Max delay: Force sync after maxDelayMs regardless of activity
  */
 export class AutoSyncService {
-    private enabled: boolean;
-    private syncService: SyncService;
+  private enabled: boolean;
+  private syncService: SyncService;
 
-    // Scheduling state
-    private debounceTimer: ReturnType<typeof setTimeout> | null = null;
-    private maxDelayTimer: ReturnType<typeof setTimeout> | null = null;
-    private lastSyncTime = 0;
-    private pendingSync = false;
-    private isSyncing = false;
-    private firstDirtyTime = 0;
+  // Scheduling state
+  private debounceTimer: ReturnType<typeof setTimeout> | null = null;
+  private maxDelayTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastSyncTime = 0;
+  private pendingSync = false;
+  private isSyncing = false;
+  private firstDirtyTime = 0;
 
-    // Stats
-    private syncCount = 0;
-    private lastError: Error | null = null;
+  // Stats
+  private syncCount = 0;
+  private lastError: Error | null = null;
 
-    constructor(syncService: SyncService, enabled = false) {
-        this.enabled = enabled;
-        this.syncService = syncService;
+  constructor(syncService: SyncService, enabled = false) {
+    this.enabled = enabled;
+    this.syncService = syncService;
 
-        if (this.enabled) {
-            logger.info({
-                debounceMs: DEBOUNCE_MS,
-                minIntervalMs: MIN_INTERVAL_MS,
-                maxDelayMs: MAX_DELAY_MS,
-            }, 'AutoSyncService initialized');
-        }
+    if (this.enabled) {
+      logger.info(
+        {
+          debounceMs: DEBOUNCE_MS,
+          minIntervalMs: MIN_INTERVAL_MS,
+          maxDelayMs: MAX_DELAY_MS,
+        },
+        "AutoSyncService initialized",
+      );
+    }
+  }
+
+  /**
+   * Notify that a conversation has been marked dirty
+   * Call this whenever conversations change
+   */
+  notifyDirty(): void {
+    if (!this.enabled) {
+      return;
     }
 
-    /**
-     * Notify that a conversation has been marked dirty
-     * Call this whenever conversations change
-     */
-    notifyDirty(): void {
-        if (!this.enabled) {
-            return;
-        }
-
-        // Record first dirty time for max delay calculation
-        if (this.firstDirtyTime === 0) {
-            this.firstDirtyTime = Date.now();
-            this.startMaxDelayTimer();
-        }
-
-        this.scheduleSync();
+    // Record first dirty time for max delay calculation
+    if (this.firstDirtyTime === 0) {
+      this.firstDirtyTime = Date.now();
+      this.startMaxDelayTimer();
     }
 
-    /**
-     * Schedule a sync with debouncing
-     */
-    private scheduleSync(): void {
-        // Clear existing debounce timer
-        if (this.debounceTimer) {
-            clearTimeout(this.debounceTimer);
-            this.debounceTimer = null;
-        }
+    this.scheduleSync();
+  }
 
-        // Calculate delay respecting throttle
-        const now = Date.now();
-        const timeSinceLastSync = now - this.lastSyncTime;
-        const throttleDelay = Math.max(0, MIN_INTERVAL_MS - timeSinceLastSync);
-        const delay = Math.max(DEBOUNCE_MS, throttleDelay);
-
-        logger.trace({
-            delay,
-            throttleDelay,
-            debounceMs: DEBOUNCE_MS,
-            timeSinceLastSync,
-        }, 'Scheduling auto-sync');
-
-        this.pendingSync = true;
-        this.debounceTimer = setTimeout(() => {
-            this.debounceTimer = null;
-            this.executeSync();
-        }, delay);
+  /**
+   * Schedule a sync with debouncing
+   */
+  private scheduleSync(): void {
+    // Clear existing debounce timer
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
     }
 
-    /**
-     * Start the max delay timer (force sync after maxDelayMs)
-     */
-    private startMaxDelayTimer(): void {
-        if (this.maxDelayTimer) {
-            return;
-        }
+    // Calculate delay respecting throttle
+    const now = Date.now();
+    const timeSinceLastSync = now - this.lastSyncTime;
+    const throttleDelay = Math.max(0, MIN_INTERVAL_MS - timeSinceLastSync);
+    const delay = Math.max(DEBOUNCE_MS, throttleDelay);
 
-        this.maxDelayTimer = setTimeout(() => {
-            this.maxDelayTimer = null;
-            if (this.pendingSync && !this.isSyncing) {
-                logger.info('Max delay reached, forcing sync');
-                this.executeSync();
-            }
-        }, MAX_DELAY_MS);
+    logger.trace(
+      {
+        delay,
+        throttleDelay,
+        debounceMs: DEBOUNCE_MS,
+        timeSinceLastSync,
+      },
+      "Scheduling auto-sync",
+    );
+
+    this.pendingSync = true;
+    this.debounceTimer = setTimeout(() => {
+      this.debounceTimer = null;
+      this.executeSync();
+    }, delay);
+  }
+
+  /**
+   * Start the max delay timer (force sync after maxDelayMs)
+   */
+  private startMaxDelayTimer(): void {
+    if (this.maxDelayTimer) {
+      return;
     }
 
-    /**
-     * Execute the sync operation
-     */
-    private async executeSync(): Promise<void> {
-        if (this.isSyncing) {
-            return;
-        }
+    this.maxDelayTimer = setTimeout(() => {
+      this.maxDelayTimer = null;
+      if (this.pendingSync && !this.isSyncing) {
+        logger.info("Max delay reached, forcing sync");
+        this.executeSync();
+      }
+    }, MAX_DELAY_MS);
+  }
 
-        this.isSyncing = true;
-        this.pendingSync = false;
-
-        // Clear max delay timer since we're syncing
-        if (this.maxDelayTimer) {
-            clearTimeout(this.maxDelayTimer);
-            this.maxDelayTimer = null;
-        }
-
-        try {
-            const startTime = Date.now();
-            const syncedCount = await this.syncService.sync();
-            const duration = Date.now() - startTime;
-            const durationSeconds = duration / 1000;
-
-            this.lastSyncTime = Date.now();
-            this.firstDirtyTime = 0;
-            this.syncCount++;
-            this.lastError = null;
-
-            // Track metrics
-            getMetrics()?.syncOperationsTotal.inc({ status: 'success' });
-            getMetrics()?.syncDuration.observe(durationSeconds);
-
-            if (syncedCount > 0) {
-                logger.info({
-                    syncedCount,
-                    duration,
-                    totalSyncs: this.syncCount,
-                }, 'Auto-sync completed');
-            } else {
-                logger.debug('Auto-sync: no dirty conversations');
-            }
-        } catch (error) {
-            this.lastError = error instanceof Error ? error : new Error(String(error));
-            getMetrics()?.syncOperationsTotal.inc({ status: 'failure' });
-            logger.error({
-                error: this.lastError.message,
-            }, 'Auto-sync failed');
-
-            // Reschedule on failure (with backoff via throttle)
-            this.scheduleSync();
-        } finally {
-            this.isSyncing = false;
-        }
+  /**
+   * Execute the sync operation
+   */
+  private async executeSync(): Promise<void> {
+    if (this.isSyncing) {
+      return;
     }
 
-    /**
-     * Force an immediate sync (bypasses debounce/throttle)
-     */
-    async syncNow(): Promise<number> {
-        // Clear pending timers
-        if (this.debounceTimer) {
-            clearTimeout(this.debounceTimer);
-            this.debounceTimer = null;
-        }
-        if (this.maxDelayTimer) {
-            clearTimeout(this.maxDelayTimer);
-            this.maxDelayTimer = null;
-        }
+    this.isSyncing = true;
+    this.pendingSync = false;
 
-        this.pendingSync = false;
-        this.firstDirtyTime = 0;
-
-        const syncedCount = await this.syncService.sync();
-        this.lastSyncTime = Date.now();
-        this.syncCount++;
-
-        return syncedCount;
+    // Clear max delay timer since we're syncing
+    if (this.maxDelayTimer) {
+      clearTimeout(this.maxDelayTimer);
+      this.maxDelayTimer = null;
     }
 
-    /**
-     * Stop auto-sync (cleanup timers)
-     */
-    stop(): void {
-        if (this.debounceTimer) {
-            clearTimeout(this.debounceTimer);
-            this.debounceTimer = null;
-        }
-        if (this.maxDelayTimer) {
-            clearTimeout(this.maxDelayTimer);
-            this.maxDelayTimer = null;
-        }
-        this.pendingSync = false;
-        logger.info('AutoSyncService stopped');
+    try {
+      const startTime = Date.now();
+      const syncedCount = await this.syncService.sync();
+      const duration = Date.now() - startTime;
+      const durationSeconds = duration / 1000;
+
+      this.lastSyncTime = Date.now();
+      this.firstDirtyTime = 0;
+      this.syncCount++;
+      this.lastError = null;
+
+      // Track metrics
+      getMetrics()?.syncOperationsTotal.inc({ status: "success" });
+      getMetrics()?.syncDuration.observe(durationSeconds);
+
+      if (syncedCount > 0) {
+        logger.info(
+          {
+            syncedCount,
+            duration,
+            totalSyncs: this.syncCount,
+          },
+          "Auto-sync completed",
+        );
+      } else {
+        logger.debug("Auto-sync: no dirty conversations");
+      }
+    } catch (error) {
+      this.lastError =
+        error instanceof Error ? error : new Error(String(error));
+      getMetrics()?.syncOperationsTotal.inc({ status: "failure" });
+      logger.error(
+        {
+          error: this.lastError.message,
+        },
+        "Auto-sync failed",
+      );
+
+      // Reschedule on failure (with backoff via throttle)
+      this.scheduleSync();
+    } finally {
+      this.isSyncing = false;
+    }
+  }
+
+  /**
+   * Force an immediate sync (bypasses debounce/throttle)
+   */
+  async syncNow(): Promise<number> {
+    // Clear pending timers
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    if (this.maxDelayTimer) {
+      clearTimeout(this.maxDelayTimer);
+      this.maxDelayTimer = null;
     }
 
-    /**
-     * Get auto-sync statistics
-     */
-    getStats(): {
-        enabled: boolean;
-        syncCount: number;
-        lastSyncTime: number;
-        pendingSync: boolean;
-        isSyncing: boolean;
-        lastError: string | null;
-    } {
-        return {
-            enabled: this.enabled,
-            syncCount: this.syncCount,
-            lastSyncTime: this.lastSyncTime,
-            pendingSync: this.pendingSync,
-            isSyncing: this.isSyncing,
-            lastError: this.lastError?.message ?? null,
-        };
+    this.pendingSync = false;
+    this.firstDirtyTime = 0;
+
+    const syncedCount = await this.syncService.sync();
+    this.lastSyncTime = Date.now();
+    this.syncCount++;
+
+    return syncedCount;
+  }
+
+  /**
+   * Stop auto-sync (cleanup timers)
+   */
+  stop(): void {
+    if (this.debounceTimer) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
     }
+    if (this.maxDelayTimer) {
+      clearTimeout(this.maxDelayTimer);
+      this.maxDelayTimer = null;
+    }
+    this.pendingSync = false;
+    logger.info("AutoSyncService stopped");
+  }
+
+  /**
+   * Get auto-sync statistics
+   */
+  getStats(): {
+    enabled: boolean;
+    syncCount: number;
+    lastSyncTime: number;
+    pendingSync: boolean;
+    isSyncing: boolean;
+    lastError: string | null;
+  } {
+    return {
+      enabled: this.enabled,
+      syncCount: this.syncCount,
+      lastSyncTime: this.lastSyncTime,
+      pendingSync: this.pendingSync,
+      isSyncing: this.isSyncing,
+      lastError: this.lastError?.message ?? null,
+    };
+  }
 }
 
 // Singleton instance
@@ -245,24 +258,24 @@ let autoSyncInstance: AutoSyncService | null = null;
  * Get or create the global AutoSyncService instance
  */
 export function getAutoSyncService(
-    syncService?: SyncService,
-    enabled?: boolean
+  syncService?: SyncService,
+  enabled?: boolean,
 ): AutoSyncService {
-    if (!autoSyncInstance) {
-        if (!syncService) {
-            syncService = getSyncService();
-        }
-        autoSyncInstance = new AutoSyncService(syncService, enabled);
+  if (!autoSyncInstance) {
+    if (!syncService) {
+      syncService = getSyncService();
     }
-    return autoSyncInstance;
+    autoSyncInstance = new AutoSyncService(syncService, enabled);
+  }
+  return autoSyncInstance;
 }
 
 /**
  * Reset the AutoSyncService (for testing)
  */
 export function resetAutoSyncService(): void {
-    if (autoSyncInstance) {
-        autoSyncInstance.stop();
-        autoSyncInstance = null;
-    }
+  if (autoSyncInstance) {
+    autoSyncInstance.stop();
+    autoSyncInstance = null;
+  }
 }
