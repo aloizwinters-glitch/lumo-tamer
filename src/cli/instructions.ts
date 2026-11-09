@@ -5,8 +5,11 @@
  * not persisted in the conversation store.
  */
 
-import { getCliInstructionsConfig, getLocalActionsConfig } from '../app/config.js';
-import { interpolateTemplate } from '../app/template.js';
+import {
+  getCliInstructionsConfig,
+  getLocalActionsConfig,
+} from "../app/config.js";
+import { interpolateTemplate } from "../app/template.js";
 
 /**
  * Build effective instructions for CLI using template system.
@@ -17,14 +20,17 @@ export function buildCliInstructions(): string | undefined {
 
   // Build executor list (comma-separated language tags)
   const executorKeys = Object.keys(localActionsConfig.executors || {});
-  const executors = executorKeys.join(', ');
+  const executors = executorKeys.join(", ");
 
   // Pre-interpolate forLocalActions with executors
-  const forLocalActions = interpolateTemplate(instructionsConfig.forLocalActions, { executors });
+  const forLocalActions = interpolateTemplate(
+    instructionsConfig.forLocalActions,
+    { executors },
+  );
 
   // Interpolate main template
   const result = interpolateTemplate(instructionsConfig.template, {
-    localActions: localActionsConfig.enabled ? 'true' : undefined,
+    localActions: localActionsConfig.enabled ? "true" : undefined,
     forLocalActions,
     executors,
   });
