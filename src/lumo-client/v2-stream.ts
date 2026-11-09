@@ -5,7 +5,7 @@
  * a small message union the LumoClient consumes. Mirrors the dispatch logic of
  * ProtonMail/WebClients applications/lumo/src/app/lib/lumo-api-client/core/streaming.ts
  * (processOpenAiChunk / processDelta / processToolCallDelta / chat.tool_call|result),
- * kept as a local adapter scoped to what this proxy needs (no image handling).
+ * kept as a local adapter scoped to what this proxy needs.
  *
  * Content and reasoning arrive encrypted (U2L) and are decrypted by the caller
  * using the per-request AD; this parser only surfaces the `encrypted` flag.
@@ -13,10 +13,20 @@
 
 import type { LumoUsage } from './types.js';
 
+function pickString(value: unknown): string | undefined {
+    return typeof value === 'string' && value.length > 0 ? value : undefined;
+}
+
+function pickBool(value: unknown): boolean | undefined {
+    return typeof value === 'boolean' ? value : undefined;
+}
+
 export type V2StreamMessage =
     | { type: 'token_data'; target: 'message' | 'reasoning' | 'tool_call'; content: string; encrypted?: boolean }
     | { type: 'server_tool_call'; call_id?: string; name: string; arguments?: string; encrypted?: boolean }
     | { type: 'server_tool_result'; call_id?: string; content: string; encrypted?: boolean }
+    /** Generated/edited image (`lumo.image_data`); `data` is base64 (U2L ciphertext when encrypted). */
+    | { type: 'image_data'; image_id: string; data: string; seed?: number; encrypted?: boolean }
     | { type: 'usage'; usage: LumoUsage }
     | { type: 'harmful' }
     | { type: 'error'; message?: string }
@@ -114,7 +124,20 @@ export class V2StreamProcessor {
         }
 
         if (objectType === 'lumo.image_data') {
-            return; // image generation not surfaced by this proxy
+            // Upstream processLumoImageDataChunk: { image: { id, data, seed?, encrypted? } }
+            const img = (obj.image ?? {}) as { id?: unknown; data?: unknown; seed?: unknown; encrypted?: unknown };
+            const imageId = pickString(img.id);
+            const data = pickString(img.data);
+            if (imageId && data) {
+                out.push({
+                    type: 'image_data',
+                    image_id: imageId,
+                    data,
+                    ...(typeof img.seed === 'number' ? { seed: img.seed } : {}),
+                    ...(pickBool(img.encrypted) ? { encrypted: true } : {}),
+                });
+            }
+            return;
         }
 
         // OpenAI-style completion chunk.
@@ -125,11 +148,13 @@ export class V2StreamProcessor {
         }
 
         if (obj.usage) {
-            const usage = obj.usage as LumoUsage;
-            // The serving model id is a top-level field on the chunk.
-            if (usage.model === undefined && typeof obj.model === 'string') {
-                usage.model = obj.model;
-            }
+            const raw = obj.usage as LumoUsage;
+            const usage: LumoUsage = {
+                ...raw,
+                ...(raw.model === undefined && typeof obj.model === 'string'
+                    ? { model: obj.model }
+                    : {}),
+            };
             out.push({ type: 'usage', usage });
         }
 
@@ -140,6 +165,7 @@ export class V2StreamProcessor {
         const choice = choices[0];
         if (choice.finish_reason === 'content_filter') {
             out.push({ type: 'harmful' });
+            return;
         }
         if (!choice.delta) {
             return;

@@ -2,6 +2,8 @@ import { describe, it, expect, vi } from 'vitest';
 import { LumoClient } from '../../src/lumo-client/client.js';
 import { Role } from '../../src/lumo-client/types.js';
 import type { ProtonApiOptions } from '../../src/lumo-client/types.js';
+import { estimatePromptTokens } from '../../src/app/token-estimate.js';
+import { getServerConfig } from '../../src/app/config.js';
 
 /** Build a fake SSE ReadableStream from CompletionChunk objects, ending with [DONE]. */
 function sseStream(chunks: object[]): ReadableStream<Uint8Array> {
@@ -55,14 +57,53 @@ describe('LumoClient (Lumo 2.0 chat/completions)', () => {
         expect(JSON.parse(res.message.toolCall!)).toEqual({ name: 'web_search', arguments: { q: 'cats' } });
     });
 
-    it('captures usage (tier category + serving model)', async () => {
+    it('streams a generated image as markdown and persists only the marker', async () => {
+        const png = 'iVBORw0KGgoAAAA';
         const { client } = makeClient(() => [
-            cc({ content: 'x' }),
-            { object: 'CompletionChunk', model: 'lumo-max', choices: [], usage: { completion_tokens: 2, applied_limit_category: 'max' } },
+            cc({ content: 'Voici :' }),
+            { object: 'lumo.image_data', image: { id: 'img-1', data: png, seed: 7 } },
         ]);
-        const res = await client.chatWithHistory([{ role: Role.User, content: 'hi' }]);
-        expect(res.usage).toEqual({ completion_tokens: 2, applied_limit_category: 'max', model: 'lumo-max' });
+        const chunks: string[] = [];
+        const res = await client.chatWithHistory([{ role: Role.User, content: 'draw' }], (c) => chunks.push(c));
+        expect(chunks.join('')).toContain(`![lumo:img-1](data:image/png;base64,${png})`);
+        expect(res.message.content).toContain('<lumo-image id="img-1" source="assistant" />');
+        expect(res.message.content).not.toContain(png);
     });
+
+    it('treats image tools as native (no misrouted-tool bounce)', async () => {
+        const { client, api } = makeClient(() => [
+            { object: 'chat.tool_call', tool_call: { id: 'c1', name: 'generate_image', arguments: '{"prompt":"cat"}' } },
+            { object: 'lumo.image_data', image: { id: 'img-2', data: 'iVBORw0KGgo=' } },
+            cc({ content: 'done' }),
+        ]);
+        const res = await client.chatWithHistory([{ role: Role.User, content: 'draw a cat' }]);
+        expect(api).toHaveBeenCalledTimes(1);
+        expect(res.misrouted).toBe(false);
+        expect(res.message.content).toContain('done');
+    });
+
+    it('captures usage (tier category + serving model)', async () => {
+        let sentBody: unknown;
+        const { client } = makeClient((opts) => {
+            sentBody = opts.data;
+            return [
+                cc({ content: 'x' }),
+                { object: 'CompletionChunk', model: 'lumo-max', choices: [], usage: { completion_tokens: 2, applied_limit_category: 'max' } },
+            ];
+        });
+        const res = await client.chatWithHistory([{ role: Role.User, content: 'hi' }]);
+        const bytes = Buffer.byteLength(JSON.stringify(sentBody), 'utf8');
+        expect(res.usage).toEqual({
+          completion_tokens: 2,
+          applied_limit_category: 'max',
+          model: 'lumo-max',
+          prompt_tokens: estimatePromptTokens(
+            bytes,
+            getServerConfig().promptTokenEstimation,
+            getServerConfig().promptTokenEstimationFactor ?? 1.0,
+          ),
+        });
+      });
 
     it('issues a separate title completion and uses its content', async () => {
         const { client, api } = makeClient((opts) => {

@@ -15,4 +15,6 @@ export type {
     AssistantMessageData,
     LumoClientOptions,
     ChatResult,
+    LumoUsage,
 } from './types.js';
+

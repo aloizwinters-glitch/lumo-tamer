@@ -6,7 +6,7 @@
  * detects native tool calls, and bounces misrouted custom tools.
  */
 
-import { decryptString } from '@lumo/crypto/index.js';
+import { decryptString, decryptUint8Array } from '@lumo/crypto/index.js';
 import {
     DEFAULT_LUMO_PUB_KEY,
     encryptTurns,
@@ -33,16 +33,30 @@ import {
 } from './types.js';
 import { buildChatCompletionsBody, LUMO_CHAT_ENDPOINT, type LumoCompletionTarget } from './v2-body.js';
 import { V2StreamProcessor } from './v2-stream.js';
-import { getInstructionsConfig, getLogConfig, getConfigMode, getCustomToolsConfig, getEnableWebSearch } from '../app/config.js';
+import { selectNativeTools } from './native-tools.js';
+import { getInstructionsConfig, getServerInstructionsConfig, getLogConfig, getConfigMode, getCustomToolsConfig, getEnableWebSearch, getEnableImageTools, getServerConfig } from '../app/config.js';
+import { isAnnounceWithoutToolCall, isToolCallNarration, isBounceableBlankReply } from '../api/tools/announce.js';
+import { estimatePromptTokens } from '../app/token-estimate.js';
 import { injectInstructionsIntoTurns } from './instructions.js';
 import { NativeToolCallProcessor, type NativeToolCallResult } from '../api/tools/native-tool-call-processor.js';
 import { postProcessTitle } from '@lumo/lib/lumo-api-client/utils.js';
+import {
+    bytesToBase64,
+    countImages,
+    encryptTurnImages,
+    generatedImageMarkdown,
+    hasPlaintextImages,
+    imagePayloadChars,
+    limitImages,
+    lumoImageMarker,
+    stripImages,
+    shouldOfferImageTools,
+} from './images.js';
 
 // Re-export types for external consumers
 export type { LumoClientOptions, ChatResult };
 
-const DEFAULT_INTERNAL_TOOLS: ToolName[] = ['proton_info'];
-const DEFAULT_EXTERNAL_TOOLS: ToolName[] = ['web_search', 'weather', 'stock', 'cryptocurrency'];
+
 
 /** Encryption context for decrypting a response stream. */
 interface EncryptionContext {
@@ -77,6 +91,16 @@ function buildBounceInstruction(toolCall: ParsedToolCall): string {
     return `${instruction}\n${toolCallJson}`;
 }
 
+function buildAnnounceBounceInstruction(): string {
+    if (getConfigMode() === 'server') {
+        return getServerInstructionsConfig().forAnnounceBounce;
+    }
+    return (
+        'Note: your last message announced a tool action but did not emit a tool call. '
+        + 'Output the tool call NOW as JSON text in a ```json code block. No preamble.'
+    );
+}
+
 export class LumoClient {
     constructor(
         private protonApi: ProtonApi,
@@ -105,13 +129,13 @@ export class LumoClient {
         opts: {
             onChunk?: (content: string) => void;
             onReasoning?: (content: string) => void;
-            isBounce: boolean;
+            suppressBounce: boolean;
         },
     ): Promise<CompletionResult> {
         const reader = stream.getReader();
         const decoder = new TextDecoder('utf-8');
         const processor = new V2StreamProcessor();
-        const nativeToolProcessor = new NativeToolCallProcessor(opts.isBounce);
+        const nativeToolProcessor = new NativeToolCallProcessor(opts.suppressBounce);
 
         let content = '';
         let reasoning = '';
@@ -120,11 +144,15 @@ export class LumoClient {
         let abortEarly = false;
         let streamEnded = false;
 
+        // Response chunks (text and image) share one AEAD associated-data string
+        // (upstream transforms/decrypt.ts); a divergence here silently breaks decryption.
+        const responseChunkAd = () => encryptionContext ? `lumo.response.${encryptionContext.requestId}.chunk` : '';
+
         // Decrypt an encrypted chunk. On failure, return null so the caller drops
         // the chunk (matching Proton's client) rather than emitting ciphertext.
         const decrypt = async (text: string, encrypted?: boolean): Promise<string | null> => {
             if (encrypted && encryptionContext) {
-                const adString = `lumo.response.${encryptionContext.requestId}.chunk`;
+                const adString = responseChunkAd();
                 try {
                     return await decryptString(text, encryptionContext.requestKey, adString);
                 } catch (error) {
@@ -180,6 +208,34 @@ export class LumoClient {
                     const result = await decrypt(msg.content, msg.encrypted);
                     if (result === null) break;
                     nativeToolProcessor.feedToolResult(result);
+                    break;
+                }
+                case 'image_data': {
+                    // Generated/edited image. Encrypted images are AES-GCM ciphertext of the
+                    // raw bytes under the response AD (upstream transforms/decrypt.ts).
+                    let base64: string;
+                    if (msg.encrypted) {
+                        if (!encryptionContext) {
+                            logger.error('Encrypted image without request key; dropping');
+                            break;
+                        }
+                        try {
+                            const adString = responseChunkAd();
+                            const bytes = await decryptUint8Array(msg.data, encryptionContext.requestKey, adString);
+                            base64 = bytesToBase64(bytes);
+                        } catch (error) {
+                            logger.error({ error }, 'Failed to decrypt image; dropping');
+                            break;
+                        }
+                    } else {
+                        base64 = msg.data;
+                    }
+                    logger.info({ imageId: msg.image_id, bytes: Math.floor(base64.length * 3 / 4) }, 'Received generated image');
+                    // Client sees markdown with the image; persisted text keeps only Lumo's marker.
+                    content += `\n\n${lumoImageMarker(msg.image_id, 'assistant')}\n\n`;
+                    if (!suppressChunks) {
+                        opts.onChunk?.(generatedImageMarkdown(msg.image_id, base64));
+                    }
                     break;
                 }
                 case 'usage':
@@ -250,7 +306,7 @@ export class LumoClient {
             target: LumoCompletionTarget;
             onChunk?: (content: string) => void;
             onReasoning?: (content: string) => void;
-            isBounce: boolean;
+            suppressBounce: boolean;
         },
     ): Promise<CompletionResult> {
         let processedTurns = turns;
@@ -262,9 +318,14 @@ export class LumoClient {
             const requestId = generateRequestId();
             const encryptionParams = new RequestEncryptionParams(requestKey, requestId);
             const requestKeyEncB64 = await encryptionParams.encryptRequestKey(DEFAULT_LUMO_PUB_KEY);
-            processedTurns = await encryptTurns(turns, encryptionParams);
+            processedTurns = await encryptTurnImages(await encryptTurns(turns, encryptionParams), encryptionParams);
+            if (hasPlaintextImages(processedTurns)) {
+                // Never let an image leave the proxy unencrypted when U2L is on.
+                throw new Error('Refusing to send unencrypted image with encryption enabled');
+            }
             encryption = { requestKeyEncB64, requestId: encryptionParams.requestId };
             encryptionContext = { requestKey: encryptionParams.requestKey, requestId: encryptionParams.requestId };
+            logger.debug({ requestId: encryptionParams.requestId }, 'Completion encryption context');
         }
 
         const body = buildChatCompletionsBody({
@@ -277,6 +338,16 @@ export class LumoClient {
             target: params.target,
         });
 
+        // Proton doesn't report prompt_tokens; estimate from request body so
+        // clients like OpenCode can make compaction decisions. Image payloads are
+        // excluded: base64 bytes are not text tokens and would trigger early compaction.
+        const bytes = Math.max(0, Buffer.byteLength(JSON.stringify(body), 'utf8') - imagePayloadChars(processedTurns));
+        const estimatedPromptTokens = estimatePromptTokens(
+          bytes,
+          getServerConfig().promptTokenEstimation,
+          getServerConfig().promptTokenEstimationFactor ?? 1.0,
+        );
+
         const stream = (await this.protonApi({
             url: params.endpoint,
             method: 'post',
@@ -284,11 +355,18 @@ export class LumoClient {
             output: 'stream',
         })) as ReadableStream<Uint8Array>;
 
-        return this.processStream(stream, encryptionContext, {
+        const result = await this.processStream(stream, encryptionContext, {
             onChunk: params.onChunk,
             onReasoning: params.onReasoning,
-            isBounce: params.isBounce,
+            suppressBounce: params.suppressBounce,
         });
+
+        // Attach estimated prompt tokens to usage for downstream reporting.
+        if (result.usage) {
+            result.usage.prompt_tokens = estimatedPromptTokens;
+        }
+
+        return result;
     }
 
     /**
@@ -313,10 +391,37 @@ export class LumoClient {
             modelTier = this.defaultOptions?.modelTier ?? 'auto',
             enableReasoning = this.defaultOptions?.enableReasoning ?? false,
             onReasoning = this.defaultOptions?.onReasoning,
+            coachAnnounceWithoutTool = this.defaultOptions?.coachAnnounceWithoutTool ?? false,
         } = options;
+
+        // Routing config: auto (default) defers to the caller's useNativeTools flag
+        // (routes pass !ctx.hasCustomTools), always/never force the behavior.
+        const routingMode = getServerConfig().customTools.routing.nativeTools;
+        const useNativeTools = routingMode === 'always' ? true : routingMode === 'never' ? false : (options.useNativeTools ?? true);
+        const coachAnnounce = coachAnnounceWithoutTool && !isBounce;
+        const bufferedChunks: string[] = [];
+        const mainOnChunk = coachAnnounce
+            ? (chunk: string) => { bufferedChunks.push(chunk); }
+            : onChunk;
+
+        // Only the most recent images are sent (upstream MAX_IMAGES_PER_REQUEST).
+        const imageCount = countImages(turns);
+        if (imageCount > 0) {
+            const limited = limitImages(turns);
+            const dropped = imageCount - countImages(limited);
+            logger.info({ images: imageCount - dropped, dropped }, 'Sending image input');
+            turns = limited;
+        }
 
         const turn = turns[turns.length - 1];
         const logConfig = getLogConfig();
+
+        // Structured per-request anchor: correlates the stream logs that follow
+        // (tool detections, bounces, rejections) with this completion.
+        logger.debug(
+            { tier: modelTier, turns: turns.length, images: countImages(turns), encrypted: enableEncryption, isBounce },
+            'Completion request',
+        );
 
         if (logConfig.messageContent) {
             logger.info(`[${turn.role}] ${turn.content && turn.content.length > 200
@@ -326,9 +431,12 @@ export class LumoClient {
         }
 
         // Read from config - applies to both server and CLI modes
-        const tools: ToolName[] = getEnableWebSearch()
-            ? [...DEFAULT_INTERNAL_TOOLS, ...DEFAULT_EXTERNAL_TOOLS]
-            : DEFAULT_INTERNAL_TOOLS;
+        const tools = selectNativeTools({
+            includeInternal: useNativeTools,
+            webSearch: getEnableWebSearch(),
+            // Never on bounces; otherwise only when this turn is about images.
+            imageTools: getEnableImageTools() && !isBounce && shouldOfferImageTools(turns),
+        });
 
         // Inject instructions at the last moment (kept out of persisted turns).
         const turnsWithInstructions = instructions
@@ -338,14 +446,14 @@ export class LumoClient {
         // Title generation is a separate, concurrent, non-fatal completion.
         // Only at the top level: a bounce must not launch its own title request.
         const titlePromise = requestTitle && !isBounce
-            ? this.runCompletion(turns, {
+            ? this.runCompletion(stripImages(turns), {
                 endpoint,
                 tier: modelTier,
                 enableReasoning: false,
                 tools: [],
                 enableEncryption,
                 target: 'title',
-                isBounce: true, // no bounce handling for the title request
+                suppressBounce: true,
             }).catch((error) => {
                 logger.warn({ error }, 'Title generation failed');
                 return null;
@@ -359,10 +467,16 @@ export class LumoClient {
             tools,
             enableEncryption,
             target: 'message',
-            onChunk,
+            onChunk: mainOnChunk,
             onReasoning,
-            isBounce,
+            suppressBounce: isBounce,
         });
+
+        logger.debug({
+            usage: main.usage,
+            tier: modelTier,
+            enableReasoning,
+        }, 'Lumo completion usage');
 
         if (logConfig.messageContent) {
             const responsePreview = main.content.length > 200
@@ -389,6 +503,24 @@ export class LumoClient {
             const titleResult = titlePromise ? await titlePromise : null;
             const title = titleResult?.content ? postProcessTitle(titleResult.content) : bounced.title;
             return { ...bounced, title };
+        }
+
+        if (coachAnnounce && (isBounceableBlankReply(main.content) || isAnnounceWithoutToolCall(main.content) || isToolCallNarration(main.content))) {
+            const bounceInstruction = buildAnnounceBounceInstruction();
+            logger.info('Bouncing announce-without-tool narration');
+            const bounceTurns: Turn[] = [
+                ...turns,
+                { role: Role.Assistant, content: main.content },
+                { role: Role.User, content: bounceInstruction },
+            ];
+            const bounced = await this.chatWithHistory(bounceTurns, onChunk, options, true);
+            const titleResult = titlePromise ? await titlePromise : null;
+            const title = titleResult?.content ? postProcessTitle(titleResult.content) : bounced.title;
+            return { ...bounced, title };
+        }
+
+        if (coachAnnounce && onChunk && bufferedChunks.length > 0) {
+            onChunk(bufferedChunks.join(''));
         }
 
         // Build message data for persistence.
