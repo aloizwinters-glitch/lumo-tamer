@@ -11,6 +11,7 @@ import {
     stableImageId,
     imagePayloadChars,
     shouldOfferImageTools,
+    selectImageTools,
 } from '../../src/lumo-client/images.js';
 import { selectNativeTools } from '../../src/lumo-client/native-tools.js';
 import { Role, type Turn } from '../../src/lumo-client/types.js';
@@ -85,6 +86,8 @@ describe('selectNativeTools', () => {
         expect(selectNativeTools({ includeInternal: false, webSearch: false, imageTools: true }))
             .toEqual(['generate_image', 'describe_image', 'edit_image']);
         expect(selectNativeTools({ includeInternal: false, webSearch: false })).toEqual([]);
+        expect(selectNativeTools({ includeInternal: false, webSearch: false, imageTools: ['describe_image'] }))
+            .toEqual(['describe_image']);
     });
 });
 
@@ -115,6 +118,23 @@ describe('shouldOfferImageTools', () => {
 
     it('offers tools when the user attaches an image, even with neutral text', () => {
         expect(shouldOfferImageTools([user('ok', [img('1')])])).toBe(true);
+    });
+
+    it('picks only the tools the message asks for', () => {
+        // Screenshot sent for context: describe only, never edit or generate.
+        expect(selectImageTools([user('Voici mon serveur FiveM, explore le code pour trouver le bug', [img('1')])]))
+            .toEqual(['describe_image']);
+        expect(selectImageTools([user('ajoute un script de spawn, voir la capture', [img('1')])]))
+            .toEqual(['describe_image']);
+        // Explicit edit of the attached picture.
+        expect(selectImageTools([user('change la couleur du t-shirt sur cette photo en rouge', [img('1')])]).sort())
+            .toEqual(['describe_image', 'edit_image']);
+        // Generation without attachment.
+        expect(selectImageTools([user('dessine un chat')])).toEqual(['generate_image']);
+        // Follow-up on a generated image.
+        const history = [user('dessine un chat'), asst('<lumo-image id="a" source="assistant" />', [img('a')])];
+        expect(selectImageTools([...history, user('rends-le bleu')]).sort()).toEqual(['describe_image', 'edit_image']);
+        expect(selectImageTools([...history, user('merci, maintenant lis server.ts')])).toEqual([]);
     });
 
     it('ignores image markers when looking for intent', () => {

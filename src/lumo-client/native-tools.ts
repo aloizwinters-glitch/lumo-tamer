@@ -9,12 +9,15 @@ export const IMAGE_TOOLS: ToolName[] = ['generate_image', 'describe_image', 'edi
 export function selectNativeTools(options: {
     includeInternal: boolean;
     webSearch: boolean;
-    /** Image tools run server-side and mix with client tools, so they don't depend on includeInternal. */
-    imageTools?: boolean;
+    /** Image tools run server-side and mix with client tools, so they don't depend on includeInternal.
+     * true = all image tools; a list = only those. */
+    imageTools?: boolean | ToolName[];
 }): ToolName[] {
+    const wanted = options.imageTools;
+    const image = wanted === true ? IMAGE_TOOLS : Array.isArray(wanted) ? IMAGE_TOOLS.filter((t) => wanted.includes(t)) : [];
     return [
         ...(options.includeInternal ? INTERNAL_TOOLS : []),
         ...(options.webSearch ? EXTERNAL_TOOLS : []),
-        ...(options.imageTools ? IMAGE_TOOLS : []),
+        ...image,
     ];
 }

@@ -15,7 +15,7 @@
 import { createHash } from 'node:crypto';
 import type { WireImage } from '@lumo/types-api.js';
 import type { RequestEncryptionParams } from '@lumo/lib/lumo-api-client/core/encryptionParams.js';
-import { Role, type Turn } from './types.js';
+import { Role, type ToolName, type Turn } from './types.js';
 
 /** Upstream MAX_IMAGES_PER_REQUEST: older images beyond this are dropped. */
 export const MAX_IMAGES_PER_REQUEST = 10;
@@ -237,38 +237,77 @@ export function asksForImage(text: string): boolean {
     return DRAW_RE.test(clean) || CREATE_IMAGE_RE.test(clean);
 }
 
+/** Verbs that ask to change an existing picture ("rends-le bleu", "remove the background"). */
+const EDIT_VERBS = [
+    '[ée]dit\\p{L}*', 'modifi\\p{L}*', 'retouch\\p{L}*', 'transform\\p{L}*', 'chang\\p{L}*', 'recolor\\p{L}*',
+    'colori\\p{L}*', 'rends', 'rendez', 'rendre', 'make', 'mets', 'mettez', 'mettre', 'ajoute\\p{L}*', 'add',
+    'enl[èe]v\\p{L}*', 'supprime\\p{L}*', 'remove\\p{L}*', 'efface\\p{L}*', 'erase', 'replace\\p{L}*',
+    'remplace\\p{L}*', 'turn', 'convert\\p{L}*', 'recadre\\p{L}*', 'crop\\p{L}*', 'agrandi\\p{L}*', 'upscale',
+    'cambia\\p{L}*', 'bearbeit\\p{L}*', '[äa]e?nder\\p{L}*', 'modifica\\p{L}*', 'mude', 'muda\\p{L}*',
+];
+const EDIT_RE = new RegExp(words(EDIT_VERBS), 'iu');
+const PICTURE_REFS = [...IMAGE_NOUNS, 'screenshots?', "captures?(?: d['’]\\s?[ée]cran)?"];
+/** Edit verb and the picture it acts on in the same clause ("change … sur cette photo"). */
+const EDIT_PICTURE_RE = new RegExp(
+    words(EDIT_VERBS) + '[^.?!\\n,;]{0,60}?' + words(PICTURE_REFS) + '|' +
+    words(PICTURE_REFS) + '[^.?!\\n,;]{0,30}?' + words(EDIT_VERBS),
+    'iu',
+);
+
+/** True if the text asks to change a picture. With `needsPictureRef`, it must also name it. */
+export function asksForImageEdit(text: string, needsPictureRef: boolean): boolean {
+    const clean = text.replace(MARKER_RE, ' ').replace(NOT_A_PICTURE_RE, ' ');
+    return needsPictureRef ? EDIT_PICTURE_RE.test(clean) : EDIT_RE.test(clean);
+}
+
 /**
- * Whether to advertise Lumo's image tools on this request.
+ * Which of Lumo's image tools to advertise on this request (possibly none).
  *
  * The web client only talks to Lumo with a human typing, but agent clients (OpenCode)
  * send many requests per user message: tool-loop steps, bounces, title generation,
- * compaction. Offering generate_image on all of them makes Lumo draw images nobody
- * asked for. So the tools are only offered when the last real user message:
- * - attached an image, or
- * - asks for a picture to be made, or
- * - directly answers an assistant message that showed an image ("make it blue"),
- * and never on helper requests (title / summary), nor again on tool-loop steps once
- * an image was generated after that message.
+ * compaction, screenshots attached for context. Advertising every image tool on all of
+ * them makes Lumo draw or edit images nobody asked for. So, based on the last real
+ * user message:
+ * - asks for a picture -> generate_image;
+ * - attached an image -> describe_image, plus edit_image only if it asks to change
+ *   the picture (a screenshot sent for context is never edited);
+ * - directly answers an assistant message that showed an image and asks for a
+ *   change ("make it blue") -> edit_image + describe_image.
+ * Never on helper requests (title / summary), nor again on tool-loop steps once an
+ * image was generated after that message.
  */
-export function shouldOfferImageTools(turns: Turn[], instructions?: string): boolean {
-    if (instructions && HELPER_REQUEST_RE.test(instructions)) return false;
+export function selectImageTools(turns: Turn[], instructions?: string): ToolName[] {
+    if (instructions && HELPER_REQUEST_RE.test(instructions)) return [];
 
     let g = turns.length - 1;
     while (g >= 0 && !isGenuineUserTurn(turns[g])) g--;
-    if (g < 0) return false;
+    if (g < 0) return [];
 
     const user = turns[g];
     const text = user.content ?? '';
-    if (HELPER_REQUEST_RE.test(text)) return false;
-    if (turns.slice(g + 1).some((t) => t.role === Role.Assistant && hasImages(t))) return false;
+    if (HELPER_REQUEST_RE.test(text)) return [];
+    if (turns.slice(g + 1).some((t) => t.role === Role.Assistant && hasImages(t))) return [];
 
-    if (hasImages(user)) return true;
-    if (asksForImage(text)) return true;
+    const tools = new Set<ToolName>();
+    if (asksForImage(text)) tools.add('generate_image');
+    if (hasImages(user)) {
+        tools.add('describe_image');
+        if (asksForImageEdit(text, true)) tools.add('edit_image');
+    }
 
     // Follow-up edit: the user's own latest turn, right after an image was shown.
     const latestIsUser = g === turns.length - 1;
     const previous = turns[g - 1];
-    return latestIsUser && previous?.role === Role.Assistant && hasImages(previous);
+    if (latestIsUser && previous?.role === Role.Assistant && hasImages(previous) && asksForImageEdit(text, false)) {
+        tools.add('edit_image');
+        tools.add('describe_image');
+    }
+    return [...tools];
+}
+
+/** Whether any image tool would be advertised on this request. */
+export function shouldOfferImageTools(turns: Turn[], instructions?: string): boolean {
+    return selectImageTools(turns, instructions).length > 0;
 }
 
 /** Safety net: true if any image would be sent in plaintext. */

@@ -50,7 +50,7 @@ import {
     limitImages,
     lumoImageMarker,
     stripImages,
-    shouldOfferImageTools,
+    selectImageTools,
 } from './images.js';
 
 // Re-export types for external consumers
@@ -419,8 +419,8 @@ export class LumoClient {
         }
 
         // Never on bounces; otherwise only when this turn is about images.
-        const offerImageTools = getEnableImageTools() && !isBounce && shouldOfferImageTools(turns, instructions);
-        if (offerImageTools) logger.info('Offering image tools on this request');
+        const offerImageTools = getEnableImageTools() && !isBounce ? selectImageTools(turns, instructions) : [];
+        if (offerImageTools.length > 0) logger.info({ tools: offerImageTools }, 'Offering image tools on this request');
 
         // Read from config - applies to both server and CLI modes
         const tools = selectNativeTools({

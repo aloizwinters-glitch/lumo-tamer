@@ -221,7 +221,12 @@ server:
   bodyLimit: "10mb"   # images travel base64-encoded; follow-ups resend them
 ```
 
-The image tools are only offered when the latest user message attaches an image, asks for a picture ("draw a cat", "generate an image of…", "create an app icon"), or directly answers an assistant message that showed an image ("make it blue"). They are never offered on agent background requests (OpenCode title generation, compaction), on bounces, or on tool-loop steps after an image was generated, so agents don't get unrequested images. Each request that offers them logs `Offering image tools on this request`.
+Only the image tools the latest user message calls for are offered:
+- `generate_image` when it asks for a picture ("draw a cat", "generate an image of…", "create an app icon");
+- `describe_image` when it attaches an image, plus `edit_image` only if it asks to change that picture ("change the shirt colour in this photo"). A screenshot attached for context is never edited;
+- `edit_image` + `describe_image` when it directly answers an assistant message that showed an image and asks for a change ("make it blue").
+
+None are offered on agent background requests (OpenCode title generation, compaction), on bounces, or on tool-loop steps after an image was generated, so agents don't get unrequested images. Each request that offers some logs `Offering image tools on this request` with the list.
 
 Inbound (vision): OpenAI `image_url` / `input_image` parts with base64 `data:` URLs (jpeg, png, gif, webp) are forwarded as Lumo images. With encryption on (the default), image bytes are U2L-encrypted with the per-request key exactly like the web client; plaintext images are never sent. Remote http(s) URLs are not fetched (no SSRF from the proxy). Like the web client, only the 10 most recent images of a conversation are sent. Images are not persisted or synced. The default `server.bodyLimit` of `10mb` covers typical screenshots; raise it for batches of large photos.  
 Outbound: generated images are streamed as markdown data URLs (`![lumo:<id>](data:image/jpeg;base64,...)`), decrypted in the proxy with the per-request key. The `lumo:<id>` alt text is the Proton image id: when the client sends that assistant message back, the proxy replays it like the web client (a `<lumo-image source="assistant">` marker plus the encrypted bytes), so a later `edit_image` / `describe_image` can find it. The stored conversation keeps only the marker, not the bytes.
