@@ -129,7 +129,7 @@ export class NativeToolCallProcessor {
         getMetrics()?.toolCallsTotal.inc({
           type: 'native', status: 'detected', tool_name: toolCall.name
         });
-        logger.info({ raw: json }, '[tools] Lumo native SSE tool_call');
+        logger.info({ tool: toolCall.name, raw: contentForLog(json) }, '[tools] Lumo native SSE tool_call');
       }
     }
     return false;
