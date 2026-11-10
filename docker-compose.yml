@@ -14,9 +14,12 @@ services:
       # Docker creates a directory if the file doesn't exist, causing errors.
       - ./config.yaml:/app/config.yaml
       - ./sessions:/app/sessions
-      # Self-update (Settings → Updates / tamer update apply). Root-equivalent
-      # on the host — only on a private box. See docs/updates.md.
-      - /var/run/docker.sock:/var/run/docker.sock
+      # One-click self-update (Settings → Updates / tamer update apply) needs
+      # the Docker socket. It is ROOT-EQUIVALENT ON THE HOST: anything that
+      # controls this container then controls the machine. Off by default;
+      # update with `docker compose pull && docker compose up -d` instead, or
+      # uncomment on a private box only. See docs/updates.md.
+      # - /var/run/docker.sock:/var/run/docker.sock
     secrets:
       - lumo-vault-key
     environment:

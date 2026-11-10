@@ -168,7 +168,6 @@ function iconBtn(href: string, label: string, svg: string, extra = ""): string {
 }
 
 export const protonUiCss = `
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 :root {
   color-scheme: light;
   --purple: #6d4aff;
@@ -212,7 +211,8 @@ export const protonUiCss = `
 html, body { margin: 0; min-height: 100%; }
 html { scrollbar-gutter: stable; }
 body {
-  font-family: Inter, system-ui, sans-serif;
+  /* Local fonts only: no request to Google Fonts (it would leak the viewer's IP). */
+  font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   background: var(--glow), var(--bg);
   background-attachment: fixed;
   color: var(--text);

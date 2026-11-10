@@ -6,6 +6,7 @@
  */
 
 import { logger } from "../../app/logger.js";
+import { contentForLog } from "../../app/log-content.js";
 import { StreamingToolDetector } from "./streaming-tool-detector.js";
 import { generateCallId } from "./call-id.js";
 import type { ParsedToolCall } from "./types.js";
@@ -64,7 +65,7 @@ export function createStreamingToolProcessor(
       });
       emitter.emitToolCall(callId, tc);
       logger.info(
-        { tool: tc.name, callId, args: tc.arguments },
+        { tool: tc.name, callId, args: contentForLog(tc.arguments) },
         "[tools] executed (emitted to client)",
       );
     }

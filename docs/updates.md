@@ -13,7 +13,9 @@ Nothing else moved to env. API key, auth, models stay in `config.yaml`. There is
 
 ## Docker socket
 
-`docker-compose.yml` mounts `/var/run/docker.sock` on `tamer`. That is root-equivalent on the host — restrict access to trusted networks only.
+One-click updates need `/var/run/docker.sock` mounted on `tamer`. That is root-equivalent on the host: whoever controls the container (or its update source) controls the machine. `docker-compose.yml` therefore leaves the mount commented out; without it, update with `docker compose pull && docker compose up -d`.
+
+If you enable it, keep the port off the internet, use a long random API key, and note that `updates.repository` and `updates.dockerSocket` can only be changed in `config.yaml` on the host, never from the web UI or the API.
 
 Portainer: add the same bind on the `lumo-tamer` container if you did not deploy from this compose file.
 

@@ -209,6 +209,7 @@ const serverMergedConfigSchema = z
     instructions: serverInstructionsConfigSchema,
     metrics: metricsConfigSchema,
     bodyLimit: byteSizeSchema,
+    host: z.string().min(1),
     port: z.number().int().positive(),
     apiKey: z.string().min(1, "server.apiKey is required"),
     apiModelName: z.string().min(1),
@@ -296,6 +297,10 @@ function loadMergedConfig(mode: ConfigMode): MergedConfig {
 
     // Env overrides for per-instance values so one config.yaml can serve
     // several instances.
+    const envHost = process.env.LUMO_TAMER_HOST?.trim();
+    if (envHost) {
+      merged.host = envHost;
+    }
     const envPort = Number(process.env.LUMO_TAMER_PORT);
     if (Number.isInteger(envPort) && envPort > 0) {
       merged.port = envPort;

@@ -5,6 +5,7 @@
  */
 
 import { isMap, type Document } from "yaml";
+import { isHostOnlyPath } from "./host-only-config.js";
 import {
   SECRET_PATHS,
   fieldCopy,
@@ -71,6 +72,8 @@ export interface ConfigField {
   noDefault?: boolean;
   /** Secret with an empty default: shows a Clear button so the value can be removed. */
   clearable?: boolean;
+  /** Read-only here; change it in config.yaml on the host. See host-only-config.ts. */
+  hostOnly?: boolean;
 }
 
 export function isPlainObject(
@@ -168,6 +171,7 @@ export function walkConfigFields(
       ...(parentDependsOn ? { dependsOn: parentDependsOn } : {}),
       ...(noDefault ? { noDefault: true } : {}),
       ...(kind === "secret" && defaultValue === "" ? { clearable: true } : {}),
+      ...(isHostOnlyPath(prefix) ? { hostOnly: true } : {}),
     });
   }
 

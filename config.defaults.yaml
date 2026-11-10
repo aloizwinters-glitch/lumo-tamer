@@ -117,6 +117,11 @@ updates:
 
 # Server Configuration
 server:
+  # Address to listen on. "127.0.0.1" = this machine only (default).
+  # "0.0.0.0" = every network interface: other devices can reach the API
+  # (with the API key) and the web UI (after unlocking it with the API key).
+  # The Docker image sets LUMO_TAMER_HOST=0.0.0.0, which overrides this.
+  host: "127.0.0.1"
   port: 3003
   apiKey: "your-secret-api-key-here"
   # Model echoed back when a request omits the model field.

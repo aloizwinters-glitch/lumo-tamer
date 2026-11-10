@@ -17,6 +17,7 @@ import { stripToolPrefix } from './prefix.js';
 import { getCustomToolsConfig } from '../../app/config.js';
 import { getMetrics } from '../../app/metrics.js';
 import { logger } from '../../app/logger.js';
+import { contentForLog } from '../../app/log-content.js';
 import type { ParsedToolCall } from './types.js';
 
 const KNOWN_NATIVE_TOOLS = new Set([
@@ -116,7 +117,7 @@ export class NativeToolCallProcessor {
         getMetrics()?.toolCallsTotal.inc({
           type: 'custom', status: 'misrouted', tool_name: strippedName
         });
-        logger.info({ tool: toolCall.name, suppressBounce: this.suppressBounce, args: toolCall.arguments }, '[tools] Lumo used native pipeline (misrouted)');
+        logger.info({ tool: toolCall.name, suppressBounce: this.suppressBounce, args: contentForLog(toolCall.arguments) }, '[tools] Lumo used native pipeline (misrouted)');
 
         // Only abort on first misroute when bounce handling is enabled.
         if (!this.suppressBounce && toolCall === this.firstToolCall) {
@@ -128,7 +129,7 @@ export class NativeToolCallProcessor {
         getMetrics()?.toolCallsTotal.inc({
           type: 'native', status: 'detected', tool_name: toolCall.name
         });
-        logger.info({ raw: json }, '[tools] Lumo native SSE tool_call');
+        logger.info({ tool: toolCall.name, raw: contentForLog(json) }, '[tools] Lumo native SSE tool_call');
       }
     }
     return false;
@@ -137,7 +138,7 @@ export class NativeToolCallProcessor {
   /** Feed tool_result SSE content. */
   feedToolResult(content: string): void {
     for (const json of this.toolResultTracker.feed(content)) {
-      logger.debug({ raw: json }, 'Native SSE tool_result');
+      logger.debug({ raw: contentForLog(json, 500) }, 'Native SSE tool_result');
       // Store first tool result for persistence
       if (!this.firstToolResult) {
         this.firstToolResult = json;
