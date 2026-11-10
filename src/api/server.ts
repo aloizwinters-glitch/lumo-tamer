@@ -15,7 +15,9 @@ import { resolveDataPath, PROJECT_ROOT } from "../app/paths.js";
 import { isInstallStale, isBuildStale } from "../app/staleness.js";
 import { getConfigPath } from "../app/config-file.js";
 import { logger } from "../app/logger.js";
+import { isLoopbackHostname } from "./access.js";
 import {
+  createUiLoginRouter,
   setupAuthMiddleware,
   setupLoggingMiddleware,
   setupMetricsMiddleware,
@@ -37,6 +39,10 @@ import { initMetrics, type MetricsService } from "../app/metrics.js";
 import { createMetricsRouter } from "./routes/metrics.js";
 import type { Application } from "../app/index.js";
 import { VERSION } from "../app/version.js";
+
+function isWeakApiKey(key: string): boolean {
+  return key === "your-secret-api-key-here" || key.length < 24;
+}
 
 export class APIServer {
   private expressApp: express.Application;
@@ -81,6 +87,7 @@ export class APIServer {
       this.expressApp.use(createMetricsRouter(this.metrics));
     }
 
+    this.expressApp.use(createUiLoginRouter(this.serverConfig.apiKey));
     this.expressApp.use(createHealthRouter(this.deps));
     this.expressApp.use(createModelsRouter());
     this.expressApp.use(createChatCompletionsRouter(this.deps));
@@ -135,29 +142,47 @@ export class APIServer {
     validateTemplateOnce(this.serverConfig.instructions.template);
 
     return new Promise((resolve) => {
-      this.httpServer = this.expressApp.listen(this.serverConfig.port, () => {
-        logger.info("========================================");
-        logger.info(`lumo-tamer v${VERSION} is ready!`);
-        logger.info(
-          `  base_url: http://localhost:${this.serverConfig.port}/v1`,
-        );
-        logger.info(
-          `  auth:     http://localhost:${this.serverConfig.port}/auth`,
-        );
-        logger.info(
-          `  config:   http://localhost:${this.serverConfig.port}/config`,
-        );
-        logger.info(
-          `  api_key:  ${this.serverConfig.apiKey.substring(0, 3)}...`,
-        );
-        if (!this.app.isAuthenticated()) {
-          logger.warn("Not logged in yet. Open /auth and sign in to Proton.");
-        }
-        logger.info("========================================\n");
-        startUpdateChecker();
-        watchConfigForReload();
-        resolve();
-      });
+      const host = this.serverConfig.host;
+      this.httpServer = this.expressApp.listen(
+        this.serverConfig.port,
+        host,
+        () => {
+          logger.info("========================================");
+          logger.info(`lumo-tamer v${VERSION} is ready!`);
+          logger.info(
+            `  base_url: http://localhost:${this.serverConfig.port}/v1`,
+          );
+          logger.info(
+            `  auth:     http://localhost:${this.serverConfig.port}/auth`,
+          );
+          logger.info(
+            `  config:   http://localhost:${this.serverConfig.port}/config`,
+          );
+          logger.info(
+            `  api_key:  ${this.serverConfig.apiKey.substring(0, 3)}...`,
+          );
+          const exposed = !isLoopbackHostname(
+            host.startsWith("[") || !host.includes(":") ? host : `[${host}]`,
+          );
+          logger.info(
+            exposed
+              ? `  listen:   ${host} (reachable from other devices; web UI needs the API key there)`
+              : `  listen:   ${host} (this machine only)`,
+          );
+          if (exposed && isWeakApiKey(this.serverConfig.apiKey)) {
+            logger.warn(
+              "server.apiKey is the example value or shorter than 24 characters while the server is reachable from other devices. Anyone on the network can use your Lumo account: set a long random key.",
+            );
+          }
+          if (!this.app.isAuthenticated()) {
+            logger.warn("Not logged in yet. Open /auth and sign in to Proton.");
+          }
+          logger.info("========================================\n");
+          startUpdateChecker();
+          watchConfigForReload();
+          resolve();
+        },
+      );
     });
   }
 }

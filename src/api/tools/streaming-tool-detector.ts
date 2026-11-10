@@ -27,6 +27,7 @@ import {
   type ParsedToolCall,
 } from "./types.js";
 import { logger } from "../../app/logger.js";
+import { contentForLog } from "../../app/log-content.js";
 import { getCustomToolsConfig } from "../../app/config.js";
 import { stripToolPrefix } from "./prefix.js";
 import { getMetrics } from "../../app/metrics.js";
@@ -89,9 +90,9 @@ export class StreamingToolDetector {
   }
 
   private showSnippet(index: number) {
-    return this.pendingText
-      .substring(Math.max(index - 7, 0), index + 7)
-      .replace(/\n/g, "\\n");
+    return contentForLog(
+      this.pendingText.substring(Math.max(index - 7, 0), index + 7),
+    );
   }
 
   /** Why a fence opened at this index — mirrors the opensFenceAt rules. */
@@ -393,7 +394,7 @@ export class StreamingToolDetector {
           } else {
             this.headerToolName = null;
             logger.info(
-              { snippet: json.replace(/\n/g, " ").substring(0, 180) },
+              { snippet: contentForLog(json, 180) },
               "[tools] not executed: JSON is not a tool call, leaked as text",
             );
             result.textToEmit += json;
@@ -578,7 +579,7 @@ export class StreamingToolDetector {
     toolName: string,
   ): void {
     logger.info(
-      `Invalid tool call (${reason}): ${content.replace(/\n/g, " ")}`,
+      `Invalid tool call (${reason}): ${contentForLog(content, 300)}`,
     );
     getMetrics()?.toolCallsTotal.inc({
       type: "custom",
@@ -600,7 +601,7 @@ export class StreamingToolDetector {
         continue;
       }
       logger.info(
-        `Tool call detected: ${canonical} ${JSON.stringify(call.arguments).substring(0, 80)}...`,
+        `Tool call detected: ${canonical} ${contentForLog(call.arguments, 80)}`,
       );
       calls.push({ name: canonical, arguments: call.arguments });
     }
@@ -753,7 +754,7 @@ export class StreamingToolDetector {
       return;
     }
     logger.info(
-      `Tool call detected (history header): ${this.pendingHistoryCall.name} ${JSON.stringify(this.pendingHistoryCall.arguments).substring(0, 80)}...`,
+      `Tool call detected (history header): ${this.pendingHistoryCall.name} ${contentForLog(this.pendingHistoryCall.arguments, 80)}`,
     );
     result.completedToolCalls.push(this.pendingHistoryCall);
     this.pendingHistoryCall = null;

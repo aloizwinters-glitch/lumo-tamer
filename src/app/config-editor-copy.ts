@@ -505,6 +505,11 @@ const COPY: Record<string, FieldCopy> = {
     more: 'For Assist and other clients that already own slash commands. "tamer help" runs /help. Case-insensitive. Leave empty to disable the spoken form.',
     examples: sample("tamer"),
   },
+  "server.host": {
+    label: "Listen address",
+    hint: "127.0.0.1 = this machine only. 0.0.0.0 = reachable from other devices.",
+    more: "With 0.0.0.0, other devices can use the API with the API key and open these pages after unlocking them with the API key. Use a long random key. The Docker image overrides this with LUMO_TAMER_HOST=0.0.0.0 so the published port works. Needs a restart.",
+  },
   "server.port": {
     label: "Listen port",
     hint: "TCP port this process listens on. Changing this does not update docker-compose.yml.",

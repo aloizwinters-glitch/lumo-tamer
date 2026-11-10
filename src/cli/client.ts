@@ -19,6 +19,7 @@ import {
   getLocalActionsConfig,
 } from "../app/config.js";
 import logger from "../app/logger.js";
+import { contentForLog } from "../app/log-content.js";
 import { BUSY_INDICATOR, clearBusyIndicator, print } from "../app/terminal.js";
 import type { Application } from "../app/index.js";
 import { randomUUID } from "crypto";
@@ -128,7 +129,7 @@ export class CLIClient {
   }
 
   private async singleQuery(query: string): Promise<void> {
-    logger.info({ query }, "Sending query");
+    logger.info({ query: contentForLog(query) }, "Sending query");
     print("");
 
     const startTime = Date.now();

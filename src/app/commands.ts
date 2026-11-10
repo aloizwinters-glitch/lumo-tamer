@@ -4,6 +4,7 @@
  */
 
 import { logger } from './logger.js';
+import { contentForLog } from './log-content.js';
 import { getCommandsConfig, getConversationsConfig } from './config.js';
 import { getSyncService, getConversationStore, getAutoSyncService } from '../conversations/index.js';
 import { markConversationPrivate, isConversationPrivate } from '../conversations/privacy.js';
@@ -57,7 +58,7 @@ export async function tryExecuteCommand(
   if (!lastUserTurn?.content || !isCommand(lastUserTurn.content)) return undefined;
 
   const response = await executeCommand(lastUserTurn.content, { ...commandContext, turns });
-  logger.info({ command: lastUserTurn.content, response }, 'Command executed via API');
+  logger.info({ command: lastUserTurn.content.trim().split(/s+/)[0], response: contentForLog(response) }, 'Command executed via API');
 
   return { isCommand: true, response };
 }

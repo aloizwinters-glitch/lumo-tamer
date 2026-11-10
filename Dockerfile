@@ -103,7 +103,10 @@ ENTRYPOINT ["sh", "-c", "\
     *)      exec \"$@\" ;; \
   esac", "--"]
 
-# Expose API port
+# Expose API port. Inside the container, listen on every interface so the
+# published port works (the config default is 127.0.0.1). The web UI still
+# asks for the API key from anything that is not the container itself.
+ENV LUMO_TAMER_HOST=0.0.0.0
 EXPOSE 3003
 
 CMD ["server"]

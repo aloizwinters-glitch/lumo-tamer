@@ -7,6 +7,7 @@ import type { ParsedToolCall } from './types.js';
 import { isToolCallJson, parseToolCallJson } from './types.js';
 import { splitToolJsonObjects } from './tool-json-split.js';
 import { logger } from '../../app/logger.js';
+import { contentForLog } from '../../app/log-content.js';
 
 function skipWs(text: string, index: number): number {
   while (index < text.length && /\s/.test(text[index])) index++;
@@ -135,7 +136,7 @@ function fromStrictJson(text: string): ParsedToolCall | null {
     if (!isToolCallJson(parsed)) return null;
     return parseToolCallJson(parsed);
   } catch (err) {
-    logger.debug({ text: text.substring(0, 500), error: (err as Error).message }, '[tools] JSON.parse failed, falling back to lenient');
+    logger.debug({ text: contentForLog(text, 500), error: (err as Error).message }, '[tools] JSON.parse failed, falling back to lenient');
     return null;
   }
 }
