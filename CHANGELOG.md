@@ -1,3 +1,45 @@
+## [0.7.1](https://github.com/banter240/lumo-tamer/compare/v0.7.0...v0.7.1) (2026-11-10)
+
+### Bug Fixes
+
+* fix(security): keep the web UI and conversation content on this machine
+
+  A security and privacy pass so the proxy does not weaken what Proton
+  promises for Lumo (no logs, zero-access history, U2L encryption).
+
+  - server.host defaults to 127.0.0.1 (LUMO_TAMER_HOST override; the
+    Dockerfile sets 0.0.0.0 so published ports keep working). Startup
+    logs the listen address and warns on exposure with a weak setup.
+  - UI routes (/config, /logs, /auth, /health, /metrics) no longer skip
+    the API key: loopback requests with a localhost Host header pass;
+    other devices authenticate once via /ui-login (HttpOnly,
+    SameSite=Strict cookie holding an HMAC of the key, never the key).
+    Bearer still works everywhere, now compared in constant time.
+  - CSRF and DNS-rebinding protection: state-changing UI requests with
+    a cross-site Sec-Fetch-Site or foreign/null Origin are refused;
+    unlock redirects accept same-origin paths only.
+  - Host-only settings (updates.repository, updates.dockerSocket, auth
+    binary/browser paths, vault/log/dump/db paths, log.messageContent,
+    server.host) are editable only in config.yaml. PUT /v1/config
+    refuses them (403), import skips them. Breaks the API-key-to-
+    host-root chain (repository + /v1/update with docker.sock mounted).
+  - docker-compose.yml no longer mounts /var/run/docker.sock by default.
+  - contentForLog() hides content-bearing log fields (tool arguments,
+    results, CLI queries, detector snippets) unless messageContent is on.
+  - Google Fonts import removed (local Inter or system UI font).
+* fix(tools): only offer image and web tools when the user asks for them
+
+  Image tools: offered only when the latest real user message asks for a
+  picture, attaches one, or follows up on an assistant image; never on
+  title/compaction helper requests, bounces, or tool-loop steps after an
+  image was generated. Only the tool the message calls for is offered
+  (generate / describe / edit), so an attached screenshot no longer gets
+  edited unprompted.
+
+  Web tools: unchanged in plain chat; on agent requests (client tools)
+  offered only when the user asks for something online, so tool-loop
+  steps no longer fire off-topic searches.
+
 ## [0.7.0](https://github.com/banter240/lumo-tamer/compare/v0.6.0...v0.7.0) (2026-11-09)
 
 ### Features
