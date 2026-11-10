@@ -92,6 +92,50 @@ describe('config page', () => {
     expect(body.current.server.apiKey).toBeNull();
   });
 
+  it('refuses web edits of host-only settings (update source, executables, paths)', async () => {
+    for (const changes of [
+      { 'updates.repository': 'attacker/evil' },
+      { 'updates.dockerSocket': '/tmp/other.sock' },
+      { 'auth.login.binaryPath': '/bin/sh' },
+      { 'log.filePath': '/etc/cron.d/x' },
+      { 'log.messageContent': true },
+      { 'server.host': '0.0.0.0' },
+    ]) {
+      const res = await fetch(`${baseUrl}/v1/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ changes }),
+      });
+      expect(res.status, Object.keys(changes)[0]).toBe(403);
+    }
+    const yaml = readFileSync(join(tmpDir, 'config.yaml'), 'utf8');
+    expect(yaml).not.toContain('attacker/evil');
+    expect(yaml).not.toContain('/bin/sh');
+
+    const fields = (await (await fetch(`${baseUrl}/v1/config`)).json()).fields as Array<{ path: string; hostOnly?: boolean }>;
+    expect(fields.find((f) => f.path === 'updates.repository')?.hostOnly).toBe(true);
+    expect(fields.find((f) => f.path === 'updates.channel')?.hostOnly).toBeUndefined();
+  });
+
+  it('import skips host-only settings', async () => {
+    const snapshot = {
+      $format: 'lumo-tamer-config',
+      version: '0.7.0',
+      exportedAt: new Date().toISOString(),
+      changes: { 'updates.repository': 'attacker/evil', 'updates.channel': 'dev' },
+    };
+    const res = await fetch(`${baseUrl}/v1/config/import`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ snapshot }),
+    });
+    const body = await res.json();
+    expect(res.status).toBe(200);
+    expect(body.report.hostOnlySkipped).toContain('updates.repository');
+    expect(readFileSync(join(tmpDir, 'config.yaml'), 'utf8')).toContain('channel: dev');
+    expect(readFileSync(join(tmpDir, 'config.yaml'), 'utf8')).not.toContain('attacker/evil');
+  });
+
   it('saves a toggle and keeps the existing API key', async () => {
     const res = await fetch(`${baseUrl}/v1/config`, {
       method: 'PUT',

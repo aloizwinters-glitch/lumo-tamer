@@ -39,6 +39,11 @@ import {
   planConfigImport,
 } from "../../app/config-transfer.js";
 import { SECRET_PATHS } from "../../app/config-editor-copy.js";
+import {
+  HOST_ONLY_MESSAGE,
+  hostOnlyChanges,
+  withoutHostOnlyChanges,
+} from "../../app/host-only-config.js";
 import { htmlPage } from "../web-ui.js";
 import { VERSION } from "../../app/version.js";
 import { clientIp, createAttemptGate } from "../attempt-limit.js";
@@ -474,9 +479,13 @@ function renderConfigPage(isAuthenticated: boolean): string {
         html += '<div class="title">' + escText(field.label) + ' ' + over + '</div>';
         html += '<p class="desc">' + escText(field.hint || '') + '</p>';
         html += extraBlock(field);
-        html += '<div class="controls"><div class="control">' + inputFor(field) + '</div>';
+        if (field.hostOnly) {
+          html += '<p class="desc"><strong>Read-only here.</strong> For security, change this in config.yaml on the host.</p>';
+        }
+        const input = inputFor(field);
+        html += '<div class="controls"><div class="control">' + (field.hostOnly ? input.replace('<input ', '<input disabled ').replace('<select ', '<select disabled ').replace('<textarea ', '<textarea disabled ') : input) + '</div>';
         html += '<div class="actions">';
-        if (field.clearable || (field.kind !== 'secret' && !field.noDefault)) {
+        if (!field.hostOnly && (field.clearable || (field.kind !== 'secret' && !field.noDefault))) {
           html += '<button type="button" class="btn-default' + (current ? ' is-current' : ' is-reset')
             + '" data-reset="' + field.path + '">' + (field.clearable ? 'Clear' : 'Default') + '</button>';
         }
@@ -1097,13 +1106,18 @@ export function createConfigRouter(
       const snapshot = parseConfigSnapshot(raw);
       const defaults = loadDefaultsYaml();
       const user = loadConfigYaml();
-      const { edits, report } = planConfigImport(
+      const planned = planConfigImport(
         snapshot,
         defaults,
         VERSION,
         user,
         SECRET_PATHS,
       );
+      const { changes, skipped: hostOnlySkipped } = withoutHostOnlyChanges(
+        planned.edits.changes,
+      );
+      const edits: ConfigEdits = { ...planned.edits, changes };
+      const report = { ...planned.report, hostOnlySkipped };
       if (body.dryRun === true) {
         res.json({ dryRun: true, report });
         return;
@@ -1176,6 +1190,12 @@ export function createConfigRouter(
                 ? body.resets.filter((p: unknown) => typeof p === "string")
                 : [],
             };
+      const blocked = hostOnlyChanges(edits.changes);
+      if (blocked.length > 0) {
+        logger.warn({ paths: blocked }, "Refused web edit of host-only settings");
+        res.status(403).json({ error: `${HOST_ONLY_MESSAGE} (${blocked.join(", ")})` });
+        return;
+      }
       const next = applyConfigEdits(loadConfigYaml(), defaults, edits);
       parseServerUserConfig(next);
       const changedPaths =

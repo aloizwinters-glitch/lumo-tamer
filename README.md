@@ -165,6 +165,8 @@ See [API clients](#api-clients) for some inspiration.
 
 - **This machine only.** The server listens on `127.0.0.1` by default. Set `server.host: "0.0.0.0"` (or `LUMO_TAMER_HOST`) to accept other devices, and use a long random API key: lumo-tamer warns at startup when the key is the example value or short.
 - **Web UI.** `/config`, `/auth`, `/logs`, `/health`, `/metrics`, restart and update open without a key only from this machine, addressed as `localhost` / `127.0.0.1`. Other devices are sent to `/ui-login`, which asks for the API key once and sets an HttpOnly, `SameSite=Strict` cookie (derived from the key, not the key itself). Requests naming another host are refused (DNS rebinding), and state-changing requests from other sites are refused (CSRF). Scripts can still use `Authorization: Bearer <key>`.
+- **Host-only settings.** Settings that could hand over the machine or the Proton session can only be changed in `config.yaml` on the host. The web UI shows them read-only, and `PUT /v1/config` and import refuse them. They cover the update source (`updates.repository`, `updates.dockerSocket`), spawned executables (`auth.login.binaryPath`), the browser that receives the Proton session (`auth.browser.*`), secret and log paths, `log.messageContent` and `server.host`.
+- **No Docker socket by default.** `docker-compose.yml` does not mount `/var/run/docker.sock`, which is root-equivalent on the host. See [docs/updates.md](docs/updates.md).
 - **No conversation content in logs.** With `log.messageContent: false` (default), prompts, replies, tool arguments, search queries and tool results are logged only as `[hidden: N chars]`, including on the `/logs` page.
 - **No third-party requests.** The web UI uses local fonts only; lumo-tamer talks to Proton (`lumo.proton.me`, `account.proton.me`) and, for update checks, GitHub.
 - **Lumo encryption is kept.** Every request uses Lumo's U2L encryption (images included), as in Proton's own web client. See Proton's [security model](https://proton.me/blog/lumo-security-model).
@@ -479,7 +481,7 @@ Self-update is optional and uses **this** container plus the Docker socket (no e
 # LUMO_TAMER_IMAGE=ghcr.io/banter240/lumo-tamer:latest
 ```
 
-Compose already bind-mounts `/var/run/docker.sock` on tamer. Settings → Updates stays in `config.yaml`. The **Update** button / `/update apply` pull that tag and recreate `lumo-tamer`.
+Update with `docker compose pull && docker compose up -d`. The **Update** button / `/update apply` (pull that tag and recreate `lumo-tamer`) need the Docker socket, which is root-equivalent on the host, so `docker-compose.yml` leaves that mount commented out. See [docs/updates.md](docs/updates.md) before enabling it.
 
 Manual pull still works:
 
