@@ -1,3 +1,17 @@
+## [0.8.0](https://github.com/banter240/lumo-tamer/compare/v0.7.1...v0.8.0) (2026-11-11)
+
+### Features
+
+* feat(web-ui): lock button to clear the unlock cookie
+
+  POST /ui-logout (idempotent, CSRF-guarded) plus a header button clear
+  the UI session cookie, so the next page load asks for the API key
+  again instead of staying unlocked for 30 days.
+
+  createAttemptGate gains success(ip), called after a correct UI unlock
+  and after a successful Proton login: only failures accumulate now, so
+  legitimate device unlocks no longer lock each other out.
+
 ## [0.7.1](https://github.com/banter240/lumo-tamer/compare/v0.7.0...v0.7.1) (2026-11-10)
 
 ### Bug Fixes
