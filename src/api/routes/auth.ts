@@ -10,30 +10,34 @@
  * - GET  /v1/auth/status  - Get current auth status
  */
 
-import { existsSync } from 'fs';
-import { Router, Request, Response } from 'express';
-import { EndpointDependencies } from '../types.js';
-import { getAutoSyncService } from '../../conversations/index.js';
-import { logger } from '../../app/logger.js';
-import { runLoginAuthentication } from '../../auth/login/authenticate.js';
-import { ProtonAuthError } from '../../auth/login/proton-auth-cli.js';
-import { SRP_ERROR_2FA_REQUIRED } from '../../auth/login/types.js';
-import { updateAuthConfig } from '../../auth/update-config.js';
-import { isCaptchaAuthError } from '../../auth/sync-capability.js';
-import { deleteTokenCache } from '../../auth/logout.js';
-import { DESKTOP_CDP_DEFAULT, DOCKER_CDP_DEFAULT, SIDECAR_NEEDED_ERROR } from '../../auth/sidecar.js';
+import { existsSync } from "fs";
+import { Router, Request, Response } from "express";
+import { EndpointDependencies } from "../types.js";
+import { getAutoSyncService } from "../../conversations/index.js";
+import { logger } from "../../app/logger.js";
+import { runLoginAuthentication } from "../../auth/login/authenticate.js";
+import { ProtonAuthError } from "../../auth/login/proton-auth-cli.js";
+import { SRP_ERROR_2FA_REQUIRED } from "../../auth/login/types.js";
+import { updateAuthConfig } from "../../auth/update-config.js";
+import { isCaptchaAuthError } from "../../auth/sync-capability.js";
+import { deleteTokenCache } from "../../auth/logout.js";
+import {
+  DESKTOP_CDP_DEFAULT,
+  DOCKER_CDP_DEFAULT,
+  SIDECAR_NEEDED_ERROR,
+} from "../../auth/sidecar.js";
 import {
   beginDesktopLogin,
   checkDesktopLogin,
   cancelDesktopLogin,
   isDesktopLoginNeededError,
-} from '../../auth/desktop-login.js';
-import { sendAuthRequired } from '../error-handler.js';
-import { htmlPage } from '../web-ui.js';
-import { VERSION } from '../../app/version.js';
-import { getConversationsConfig } from '../../app/config.js';
-import { clientIp, createAttemptGate } from '../attempt-limit.js';
-import { APP, AUTH, PORTS } from '../../app/const.js';
+} from "../../auth/desktop-login.js";
+import { sendAuthRequired } from "../error-handler.js";
+import { htmlPage } from "../web-ui.js";
+import { VERSION } from "../../app/version.js";
+import { getConversationsConfig } from "../../app/config.js";
+import { clientIp, createAttemptGate } from "../attempt-limit.js";
+import { APP, AUTH, PORTS } from "../../app/const.js";
 
 const allowLoginAttempt = createAttemptGate(AUTH.LOGIN_MAX_ATTEMPTS);
 
@@ -43,46 +47,64 @@ export interface AuthRouterHooks {
   getSessionNotice?: () => string | null;
 }
 
-function loginStatus(syncCapable: boolean, method?: string): {
+function loginStatus(
+  syncCapable: boolean,
+  method?: string,
+): {
   how: string;
-  sync: 'on' | 'off' | 'unavailable';
+  sync: "on" | "off" | "unavailable";
   note: string;
   message: string;
   detail: string;
 } {
-  const how = method === 'browser' ? 'Browser' : method === 'rclone' ? 'rclone' : 'Password';
+  const how =
+    method === "browser"
+      ? "Browser"
+      : method === "rclone"
+        ? "rclone"
+        : "Password";
   const message = `Signed in via ${how.toLowerCase()}. This server can reach Lumo.`;
   const enabled = getConversationsConfig().enableSync;
   if (!syncCapable) {
-    const note = method === 'browser'
-      ? 'Cookies were not from lumo.proton.me, so this session has no Lumo-scoped keys.'
-      : 'Password login only got Drive scope.';
+    const note =
+      method === "browser"
+        ? "Cookies were not from lumo.proton.me, so this session has no Lumo-scoped keys."
+        : "Password login only got Drive scope.";
     return {
-      how, sync: 'unavailable', note, message,
+      how,
+      sync: "unavailable",
+      note,
+      message,
       detail: `Conversation sync is not available. ${note}`,
     };
   }
   if (enabled) {
     return {
-      how, sync: 'on', note: 'Threads can show up on lumo.proton.me.', message,
-      detail: 'Conversation sync is on in Settings. Threads can show up on lumo.proton.me.',
+      how,
+      sync: "on",
+      note: "Threads can show up on lumo.proton.me.",
+      message,
+      detail:
+        "Conversation sync is on in Settings. Threads can show up on lumo.proton.me.",
     };
   }
   return {
-    how, sync: 'off',
-    note: 'Turn on “Sync chats to Proton” in Settings if you want threads there.',
+    how,
+    sync: "off",
+    note: "Turn on “Sync chats to Proton” in Settings if you want threads there.",
     message,
-    detail: 'This session can sync. Sync chats to Proton is off in Settings.',
+    detail: "This session can sync. Sync chats to Proton is off in Settings.",
   };
 }
 
 function signedInCard(syncCapable: boolean, method?: string): string {
   const st = loginStatus(syncCapable, method);
-  const syncPill = st.sync === 'on'
-    ? '<span class="pill pill-ok">On</span>'
-    : st.sync === 'off'
-      ? '<span class="pill pill-off">Off</span>'
-      : '<span class="pill pill-no">Unavailable</span>';
+  const syncPill =
+    st.sync === "on"
+      ? '<span class="pill pill-ok">On</span>'
+      : st.sync === "off"
+        ? '<span class="pill pill-off">Off</span>'
+        : '<span class="pill pill-no">Unavailable</span>';
   return `<div class="card">
     <p class="signed-kicker">Signed in</p>
     <h2 class="signed-title">${st.how}</h2>
@@ -102,12 +124,21 @@ function signedInCard(syncCapable: boolean, method?: string): string {
 }
 
 function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (ch) => (
-    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch] ?? ch
-  ));
+  return value.replace(
+    /[&<>"']/g,
+    (ch) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[
+        ch
+      ] ?? ch,
+  );
 }
 
-function renderAuthPage(state: { loggedIn: boolean; sync?: boolean; method?: string; sessionNotice?: string }): string {
+function renderAuthPage(state: {
+  loggedIn: boolean;
+  sync?: boolean;
+  method?: string;
+  sessionNotice?: string;
+}): string {
   const extraCss = `
     .fail { margin: 1.15rem 0 0; border-top: 1px solid var(--line); padding-top: 0.95rem; }
     .fail > summary {
@@ -141,8 +172,8 @@ function renderAuthPage(state: { loggedIn: boolean; sync?: boolean; method?: str
   const inner = state.loggedIn
     ? signedInCard(!!state.sync, state.method)
     : `<div class="card">
-  ${state.sessionNotice ? `<p class="err" id="sessionNotice">${escapeHtml(state.sessionNotice)}</p>` : ''}
-  <p class="lede">${state.sessionNotice ? 'Log in again to restore Lumo.' : 'Sign in with Proton. Open the link on this phone or any browser.'}</p>
+  ${state.sessionNotice ? `<p class="err" id="sessionNotice">${escapeHtml(state.sessionNotice)}</p>` : ""}
+  <p class="lede">${state.sessionNotice ? "Log in again to restore Lumo." : "Sign in with Proton. Open the link on this phone or any browser."}</p>
   <button type="button" id="signInBtn" style="width:100%">Start Proton sign-in</button>
   <div id="signInPending" hidden style="margin-top:0.85rem">
     <p class="hint" id="signInHint">Finish sign-in on Proton, keep this page open.</p>
@@ -333,23 +364,29 @@ function renderAuthPage(state: { loggedIn: boolean; sync?: boolean; method?: str
     })();
   </script>`;
   return htmlPage({
-    title: 'Sign in · lumo-tamer',
+    title: "Sign in · lumo-tamer",
     body: inner,
     extraCss,
-    page: 'auth',
+    page: "auth",
     version: VERSION,
   });
 }
 
-export function createAuthRouter(deps: EndpointDependencies, hooks: AuthRouterHooks = {}): Router {
+export function createAuthRouter(
+  deps: EndpointDependencies,
+  hooks: AuthRouterHooks = {},
+): Router {
   const router = Router();
 
-  router.get('/auth', async (_req: Request, res: Response) => {
+  router.get("/auth", async (_req: Request, res: Response) => {
     if (deps.authManager && !deps.authManager.getProvider().isValid()) {
       try {
         await deps.authManager.refreshNow();
       } catch (error) {
-        logger.warn({ error }, 'Re-login required: token refresh failed on /auth');
+        logger.warn(
+          { error },
+          "Re-login required: token refresh failed on /auth",
+        );
       }
     }
 
@@ -357,30 +394,36 @@ export function createAuthRouter(deps: EndpointDependencies, hooks: AuthRouterHo
       try {
         await hooks.onAuthenticated?.();
       } catch (error) {
-        logger.warn({ error }, 'Vault present but could not load it for /auth');
+        logger.warn({ error }, "Vault present but could not load it for /auth");
         try {
           await deleteTokenCache(deps.vaultPath);
-        } catch { /* still show the login form */ }
+        } catch {
+          /* still show the login form */
+        }
       }
     }
 
     if (deps.authManager?.getProvider().isValid()) {
       const provider = deps.authManager.getProvider();
-      res.type('html').send(renderAuthPage({
-        loggedIn: true,
-        sync: provider.supportsFullApi(),
-        method: provider.method,
-      }));
+      res.type("html").send(
+        renderAuthPage({
+          loggedIn: true,
+          sync: provider.supportsFullApi(),
+          method: provider.method,
+        }),
+      );
       return;
     }
 
-    res.type('html').send(renderAuthPage({
-      loggedIn: false,
-      sessionNotice: hooks.getSessionNotice?.() ?? undefined,
-    }));
+    res.type("html").send(
+      renderAuthPage({
+        loggedIn: false,
+        sessionNotice: hooks.getSessionNotice?.() ?? undefined,
+      }),
+    );
   });
 
-  router.post('/auth/logout', async (_req: Request, res: Response) => {
+  router.post("/auth/logout", async (_req: Request, res: Response) => {
     try {
       getAutoSyncService()?.stop();
       if (deps.authManager) {
@@ -393,29 +436,40 @@ export function createAuthRouter(deps: EndpointDependencies, hooks: AuthRouterHo
       if (deps.vaultPath) {
         try {
           await deleteTokenCache(deps.vaultPath);
-        } catch { /* still clear in-memory auth */ }
+        } catch {
+          /* still clear in-memory auth */
+        }
       }
     }
     try {
       await hooks.onLoggedOut?.();
-    } catch (_) { /* still return success so the UI can show the login form */ }
-    logger.info('Logout via /auth');
-    res.json({ success: true, message: 'Signed out. You can log in with another account.' });
+    } catch (_) {
+      /* still return success so the UI can show the login form */
+    }
+    logger.info("Logout via /auth");
+    res.json({
+      success: true,
+      message: "Signed out. You can log in with another account.",
+    });
   });
 
-  router.post('/auth/login', async (req: Request, res: Response) => {
-    const username = typeof req.body?.username === 'string' ? req.body.username.trim() : '';
-    const password = typeof req.body?.password === 'string' ? req.body.password : '';
-    const totp = typeof req.body?.totp === 'string' ? req.body.totp.trim() : '';
+  router.post("/auth/login", async (req: Request, res: Response) => {
+    const username =
+      typeof req.body?.username === "string" ? req.body.username.trim() : "";
+    const password =
+      typeof req.body?.password === "string" ? req.body.password : "";
+    const totp = typeof req.body?.totp === "string" ? req.body.totp.trim() : "";
 
     if (!username || !password) {
-      res.status(400).json({ error: 'Email and password are required' });
+      res.status(400).json({ error: "Email and password are required" });
       return;
     }
 
     const ip = clientIp(req);
-    if (!allowLoginAttempt(ip)) {
-      res.status(429).json({ error: 'Too many login attempts. Wait a few minutes.' });
+    if (!allowLoginAttempt.allow(ip)) {
+      res
+        .status(429)
+        .json({ error: "Too many login attempts. Wait a few minutes." });
       return;
     }
 
@@ -428,10 +482,14 @@ export function createAuthRouter(deps: EndpointDependencies, hooks: AuthRouterHo
       try {
         updateAuthConfig({ method: login.method });
       } catch (error) {
-        logger.warn({ error }, 'Could not persist auth.method after login');
+        logger.warn({ error }, "Could not persist auth.method after login");
       }
       await hooks.onAuthenticated?.();
-      logger.info({ sync: login.sync, method: login.method }, 'Login via /auth successful');
+      allowLoginAttempt.success(ip);
+      logger.info(
+        { sync: login.sync, method: login.method },
+        "Login via /auth successful",
+      );
       const copy = loginStatus(login.sync, login.method);
       res.json({
         success: true,
@@ -441,8 +499,11 @@ export function createAuthRouter(deps: EndpointDependencies, hooks: AuthRouterHo
         detail: copy.detail,
       });
     } catch (error) {
-      if (error instanceof ProtonAuthError && error.errorCode === SRP_ERROR_2FA_REQUIRED) {
-        res.status(401).json({ needTotp: true, error: '2FA code required' });
+      if (
+        error instanceof ProtonAuthError &&
+        error.errorCode === SRP_ERROR_2FA_REQUIRED
+      ) {
+        res.status(401).json({ needTotp: true, error: "2FA code required" });
         return;
       }
       if (isDesktopLoginNeededError(error)) {
@@ -452,46 +513,51 @@ export function createAuthRouter(deps: EndpointDependencies, hooks: AuthRouterHo
             needDesktopLogin: true,
             url: started.url,
             id: started.id,
-            error: 'Proton blocked password login. Open Proton sign-in on any device.',
+            error:
+              "Proton blocked password login. Open Proton sign-in on any device.",
           });
           return;
         } catch (signInError) {
-          logger.error({ signInError }, 'Could not start Proton sign-in');
+          logger.error({ signInError }, "Could not start Proton sign-in");
           res.status(401).json({
-            error: 'Proton blocked password login, and sign-in could not be started. See “If login fails”.',
+            error:
+              "Proton blocked password login, and sign-in could not be started. See “If login fails”.",
           });
           return;
         }
       }
-      const message = error instanceof Error ? error.message : 'Login failed';
+      const message = error instanceof Error ? error.message : "Login failed";
       logger.error({ error }, "Can't log in via /auth");
       const sidecarHint = message === SIDECAR_NEEDED_ERROR;
       res.status(401).json({
         error: isCaptchaAuthError(error)
-          ? 'Proton asked for a CAPTCHA. Open lumo.proton.me once from the same internet as this server, then try again.'
+          ? "Proton asked for a CAPTCHA. Open lumo.proton.me once from the same internet as this server, then try again."
           : sidecarHint
             ? SIDECAR_NEEDED_ERROR
-            : message.replace(/^Authentication failed: /i, ''),
+            : message.replace(/^Authentication failed: /i, ""),
       });
     }
   });
 
-  router.post('/auth/sign-in/start', async (_req: Request, res: Response) => {
+  router.post("/auth/sign-in/start", async (_req: Request, res: Response) => {
     try {
       const started = await beginDesktopLogin();
       res.json({ url: started.url, id: started.id });
     } catch (error) {
-      logger.error({ error }, 'POST /auth/sign-in/start failed');
+      logger.error({ error }, "POST /auth/sign-in/start failed");
       res.status(502).json({
-        error: error instanceof Error ? error.message : 'Could not start Proton sign-in',
+        error:
+          error instanceof Error
+            ? error.message
+            : "Could not start Proton sign-in",
       });
     }
   });
 
-  router.get('/auth/sign-in/status', async (req: Request, res: Response) => {
-    const id = typeof req.query.id === 'string' ? req.query.id : '';
+  router.get("/auth/sign-in/status", async (req: Request, res: Response) => {
+    const id = typeof req.query.id === "string" ? req.query.id : "";
     if (!id) {
-      res.status(400).json({ error: 'Missing id' });
+      res.status(400).json({ error: "Missing id" });
       return;
     }
     try {
@@ -503,20 +569,23 @@ export function createAuthRouter(deps: EndpointDependencies, hooks: AuthRouterHo
       try {
         updateAuthConfig({ method: result.method });
       } catch (error) {
-        logger.warn({ error }, 'Could not persist auth.method after Proton sign-in');
+        logger.warn(
+          { error },
+          "Could not persist auth.method after Proton sign-in",
+        );
       }
       await hooks.onAuthenticated?.();
       res.json({ ready: true, sync: result.sync, method: result.method });
     } catch (error) {
-      logger.error({ error }, 'GET /auth/sign-in/status failed');
+      logger.error({ error }, "GET /auth/sign-in/status failed");
       res.status(502).json({
-        error: error instanceof Error ? error.message : 'Sign-in poll failed',
+        error: error instanceof Error ? error.message : "Sign-in poll failed",
       });
     }
   });
 
-  router.post('/auth/sign-in/cancel', (req: Request, res: Response) => {
-    const id = typeof req.body?.id === 'string' ? req.body.id : undefined;
+  router.post("/auth/sign-in/cancel", (req: Request, res: Response) => {
+    const id = typeof req.body?.id === "string" ? req.body.id : undefined;
     cancelDesktopLogin(id);
     res.json({ ok: true });
   });
@@ -530,13 +599,13 @@ export function createAuthRouter(deps: EndpointDependencies, hooks: AuthRouterHo
    * - 200: Logout successful
    * - 500: Logout failed
    */
-  router.post('/v1/auth/logout', async (req: Request, res: Response) => {
+  router.post("/v1/auth/logout", async (req: Request, res: Response) => {
     try {
       if (!deps.authManager || !deps.vaultPath) {
         res.status(500).json({
           error: {
-            message: 'Auth manager not available',
-            type: 'server_error',
+            message: "Auth manager not available",
+            type: "server_error",
           },
         });
         return;
@@ -549,24 +618,25 @@ export function createAuthRouter(deps: EndpointDependencies, hooks: AuthRouterHo
       // Perform logout (stops refresh timer, revokes session, deletes tokens)
       await deps.authManager.logout();
 
-      logger.info('Logout via API successful');
+      logger.info("Logout via API successful");
 
       // Schedule graceful shutdown after response is fully sent
-      res.on('finish', () => {
-        logger.info('Shutting down after logout...');
+      res.on("finish", () => {
+        logger.info("Shutting down after logout...");
         process.exit(0);
       });
 
       res.json({
         success: true,
-        message: 'Logged out successfully. Session revoked and tokens deleted. Server shutting down...',
+        message:
+          "Logged out successfully. Session revoked and tokens deleted. Server shutting down...",
       });
     } catch (error) {
-      logger.error({ error }, 'Logout API failed');
+      logger.error({ error }, "Logout API failed");
       res.status(500).json({
         error: {
-          message: error instanceof Error ? error.message : 'Logout failed',
-          type: 'server_error',
+          message: error instanceof Error ? error.message : "Logout failed",
+          type: "server_error",
         },
       });
     }
@@ -581,13 +651,13 @@ export function createAuthRouter(deps: EndpointDependencies, hooks: AuthRouterHo
    * - 200: Refresh successful
    * - 500: Refresh failed
    */
-  router.post('/v1/auth/refresh', async (req: Request, res: Response) => {
+  router.post("/v1/auth/refresh", async (req: Request, res: Response) => {
     try {
       if (!deps.authManager) {
         res.status(500).json({
           error: {
-            message: 'Auth manager not available',
-            type: 'server_error',
+            message: "Auth manager not available",
+            type: "server_error",
           },
         });
         return;
@@ -595,22 +665,22 @@ export function createAuthRouter(deps: EndpointDependencies, hooks: AuthRouterHo
 
       await deps.authManager.refreshNow();
 
-      logger.info('Token refresh via API successful');
+      logger.info("Token refresh via API successful");
 
       res.json({
         success: true,
-        message: 'Tokens refreshed successfully.',
+        message: "Tokens refreshed successfully.",
       });
     } catch (error) {
-      logger.error({ error }, 'Token refresh API failed');
+      logger.error({ error }, "Token refresh API failed");
       if (!deps.authManager) {
         sendAuthRequired(req, res);
         return;
       }
       res.status(500).json({
         error: {
-          message: error instanceof Error ? error.message : 'Refresh failed',
-          type: 'server_error',
+          message: error instanceof Error ? error.message : "Refresh failed",
+          type: "server_error",
         },
       });
     }
@@ -624,12 +694,12 @@ export function createAuthRouter(deps: EndpointDependencies, hooks: AuthRouterHo
    * Response:
    * - 200: Status object
    */
-  router.get('/v1/auth/status', (req: Request, res: Response) => {
+  router.get("/v1/auth/status", (req: Request, res: Response) => {
     if (!deps.authManager) {
       res.status(500).json({
         error: {
-          message: 'Auth manager not available',
-          type: 'server_error',
+          message: "Auth manager not available",
+          type: "server_error",
         },
       });
       return;

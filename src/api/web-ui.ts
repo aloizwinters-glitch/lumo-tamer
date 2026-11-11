@@ -21,6 +21,8 @@ const THEME_BIND = `(function(){var btn=document.getElementById('themeToggle');i
 
 const LOGOUT_BIND = `(function(){var btn=document.getElementById('logout');if(!btn)return;btn.addEventListener('click',function(){btn.disabled=true;btn.textContent='Signing out…';fetch('/auth/logout',{method:'POST'}).catch(function(){}).then(function(){location.href='/auth';});});})();`;
 
+const UI_LOCK_BIND = `(function(){var btn=document.getElementById('uiLockBtn');if(!btn)return;btn.addEventListener('click',function(){var f=document.createElement('form');f.method='post';f.action='/ui-logout';document.body.appendChild(f);f.submit();});})();`;
+
 // Shared browser helpers: one toast implementation for all BIND scripts.
 const WEB_HELPERS = `(function(){window.__ltToast=function(msg,ok){var c=document.getElementById('toast-container');if(!c)return;var el=document.createElement('div');el.className='toast '+(ok?'ok':'err');el.textContent=msg;el.title='Click to copy, then close';var gone=false;function bye(){if(gone)return;gone=true;el.style.opacity='0';el.style.transform='translateX(100%)';setTimeout(function(){el.remove();},300);}el.addEventListener('click',function(){try{navigator.clipboard.writeText(msg);}catch(e){}bye();});c.appendChild(el);if(ok)setTimeout(bye,4500);};})();`;
 
@@ -162,6 +164,9 @@ const ICON_LOGS =
 
 const ICON_RESTART =
   '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><polyline points="21 3 21 8 16 8"/></svg>';
+
+const ICON_LOCK =
+  '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>';
 
 function iconBtn(href: string, label: string, svg: string, extra = ""): string {
   return `<a class="icon-btn" href="${href}" aria-label="${label}" title="${label}"${extra}>${svg}</a>`;
@@ -367,6 +372,7 @@ export function htmlPage(options: {
         ${iconBtn(REPO_URL, "GitHub", ICON_GITHUB, ' target="_blank" rel="noopener noreferrer"')}
         <button type="button" class="theme-btn" id="themeToggle" aria-label="Toggle theme"></button>
         <button type="button" class="icon-btn" id="uiRestartBtn" aria-label="Restart server" title="Restart server">${ICON_RESTART}</button>
+        <button type="button" class="icon-btn" id="uiLockBtn" aria-label="Lock web UI" title="Lock web UI (clear the unlock cookie)">${ICON_LOCK}</button>
         ${navBtn}
       </div>
     </div>
@@ -375,7 +381,7 @@ export function htmlPage(options: {
     </div>
   </div>
   <div id="toast-container" aria-live="polite"></div>
-  <script>${WEB_HELPERS}${THEME_BIND}${UPDATE_BIND}${options.page === "auth" ? "" : AUTH_STATUS_BIND}${LOGOUT_BIND}${RESTART_BIND}</script>
+  <script>${WEB_HELPERS}${THEME_BIND}${UPDATE_BIND}${options.page === "auth" ? "" : AUTH_STATUS_BIND}${LOGOUT_BIND}${RESTART_BIND}${UI_LOCK_BIND}</script>
 </body>
 </html>`;
 }

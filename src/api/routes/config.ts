@@ -1086,7 +1086,7 @@ export function createConfigRouter(
   });
 
   router.post("/v1/config/import", (req: Request, res: Response) => {
-    if (!allowSave(clientIp(req))) {
+    if (!allowSave.allow(clientIp(req))) {
       res
         .status(429)
         .json({ error: "Too many config saves. Wait a few minutes." });
@@ -1161,7 +1161,7 @@ export function createConfigRouter(
   });
 
   router.put("/v1/config", (req: Request, res: Response) => {
-    if (!allowSave(clientIp(req))) {
+    if (!allowSave.allow(clientIp(req))) {
       res
         .status(429)
         .json({ error: "Too many config saves. Wait a few minutes." });
@@ -1192,8 +1192,13 @@ export function createConfigRouter(
             };
       const blocked = hostOnlyChanges(edits.changes);
       if (blocked.length > 0) {
-        logger.warn({ paths: blocked }, "Refused web edit of host-only settings");
-        res.status(403).json({ error: `${HOST_ONLY_MESSAGE} (${blocked.join(", ")})` });
+        logger.warn(
+          { paths: blocked },
+          "Refused web edit of host-only settings",
+        );
+        res
+          .status(403)
+          .json({ error: `${HOST_ONLY_MESSAGE} (${blocked.join(", ")})` });
         return;
       }
       const next = applyConfigEdits(loadConfigYaml(), defaults, edits);

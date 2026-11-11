@@ -108,6 +108,16 @@ export function uiSessionCookie(apiKey: string, secure: boolean): string {
   ].join("; ");
 }
 
+export function uiSessionClearCookie(): string {
+  return [
+    `${UI_SESSION_COOKIE}=`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Strict",
+    "Max-Age=0",
+  ].join("; ");
+}
+
 /**
  * Browser-made state changes must come from this server's own pages.
  * Bearer-authenticated API clients are not browsers and are not checked.
