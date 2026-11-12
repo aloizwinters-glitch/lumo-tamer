@@ -121,6 +121,29 @@ describe("shouldOfferImageTools", () => {
     content,
     ...(images ? { images } : {}),
   });
+
+  it("ignores OpenCode's post-compaction checkpoint and shell notices", () => {
+    const checkpoint = [
+      "## Objective",
+      "- Créer une icône pour l'app Compta et générer une image de fond",
+      "## Work State",
+      "### Completed",
+      "- (none)",
+      "### Active",
+      "- dessine le logo",
+      "## Next Move",
+      "1. Chercher sur internet la dernière version d'ox_lib",
+    ].join("\n");
+    expect(selectImageTools([user(checkpoint)])).toEqual([]);
+    expect(
+      selectImageTools([
+        user("dessine-moi un chat"),
+        { role: Role.Assistant, content: "ok" },
+        user("Fais un résumé"),
+        user('<shell id="sh_1" state="completed" command="x">image</shell>'),
+      ]),
+    ).toEqual([]);
+  });
   const asst = (content: string, images?: ReturnType<typeof img>[]): Turn => ({
     role: Role.Assistant,
     content,
