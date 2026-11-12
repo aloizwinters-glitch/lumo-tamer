@@ -344,6 +344,78 @@ describe("StreamingToolDetector", () => {
     });
   });
 
+  describe("markdown header + arguments block", () => {
+    const tools = { knownToolNames: ["shell", "glob", "read", "write"] };
+
+    it("runs **user:shell** followed by a plain fence (seen live: turn ended as text)", () => {
+      const detector = new StreamingToolDetector(tools);
+      const { allText, allToolCalls } = processAll(detector, [
+        'Je regarde d\'abord ce que contient chaque pack :\n\n\n**user:shell**\n```\n{"command": "Get-ChildItem -LiteralPath \'C:\\\\Users\\\\a\'"}\n```',
+      ]);
+      expect(allToolCalls).toEqual([
+        {
+          name: "shell",
+          arguments: { command: "Get-ChildItem -LiteralPath 'C:\\Users\\a'" },
+        },
+      ]);
+      expect(allText).toContain("Je regarde");
+      expect(allText).not.toContain("user:shell");
+      expect(allText).not.toContain("Get-ChildItem");
+    });
+
+    it("runs several headed calls in one reply, across chunk boundaries", () => {
+      const detector = new StreamingToolDetector(tools);
+      const { allText, allToolCalls } = processAll(detector, [
+        'Je continue :**user:glob**\n```\n{"path": "C:\\\\res", "pattern": "**/fx',
+        'manifest.lua"}\n```\n**user:',
+        'shell**\n```json\n{"command": "dir"}\n```',
+      ]);
+      expect(allToolCalls).toEqual([
+        {
+          name: "glob",
+          arguments: { path: "C:\\res", pattern: "**/fxmanifest.lua" },
+        },
+        { name: "shell", arguments: { command: "dir" } },
+      ]);
+      expect(allText.trim()).toBe("Je continue :");
+    });
+
+    it("accepts backtick and plain prefixed headers, and a raw object", () => {
+      for (const header of ["`user:read`", "user:read", "**read**"]) {
+        const detector = new StreamingToolDetector(tools);
+        const { allToolCalls } = processAll(detector, [
+          `Lecture :\n${header}\n{"filePath": "/tmp/a.lua", "limit": 60}`,
+        ]);
+        expect(allToolCalls, header).toEqual([
+          { name: "read", arguments: { filePath: "/tmp/a.lua", limit: 60 } },
+        ]);
+      }
+    });
+
+    it("leaves prose headers and unknown tools alone", () => {
+      for (const reply of [
+        'Résumé\n```\n{"a": 1}\n```',
+        '**Exemple**\n```json\n{"command": "ls"}\n```',
+        '**user:nope**\n```\n{"command": "ls"}\n```',
+      ]) {
+        const detector = new StreamingToolDetector(tools);
+        const { allText, allToolCalls } = processAll(detector, [reply]);
+        expect(allToolCalls, reply).toHaveLength(0);
+        expect(allText, reply).toContain("```");
+      }
+    });
+
+    it("keeps the header text when the block under it is not arguments", () => {
+      const detector = new StreamingToolDetector(tools);
+      const { allText, allToolCalls } = processAll(detector, [
+        "**user:shell**\n```\nGet-ChildItem\n```",
+      ]);
+      expect(allToolCalls).toHaveLength(0);
+      expect(allText).toContain("**user:shell**");
+      expect(allText).toContain("Get-ChildItem");
+    });
+  });
+
   describe("history header echo", () => {
     it("executes Tool Call: name plus args JSON when that is the only call", () => {
       const detector = new StreamingToolDetector({ knownToolNames: ["bash"] });
