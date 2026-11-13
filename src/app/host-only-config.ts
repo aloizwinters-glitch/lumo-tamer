@@ -26,6 +26,10 @@ export const HOST_ONLY_PATHS: ReadonlySet<string> = new Set([
   "cli.log.filePath",
   "conversations.databasePath",
   "server.host",
+  // Executables lumo-tamer spawns for video analysis.
+  "server.video.ffmpegPath",
+  "server.video.ffprobePath",
+  "server.video.transcribeCommand",
 ]);
 
 export function isHostOnlyPath(path: string): boolean {
