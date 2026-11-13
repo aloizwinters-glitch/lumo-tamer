@@ -122,6 +122,19 @@ describe("shouldOfferImageTools", () => {
     ...(images ? { images } : {}),
   });
 
+  it("ignores OpenCode instruction notices (skills list, date)", () => {
+    const skills =
+      "The available skills have changed. This list supersedes the previous available skills list.\n- image-gen: Generate images and draw illustrations\n- web: search the web for the latest news";
+    expect(
+      selectImageTools([
+        user("tu as redémarré la ressource ?"),
+        { role: Role.Assistant, content: "ok" },
+        user(skills),
+      ]),
+    ).toEqual([]);
+    expect(selectImageTools([user("Today's date is now: Fri Nov 13 2026")])).toEqual([]);
+  });
+
   it("ignores OpenCode's post-compaction checkpoint and shell notices", () => {
     const checkpoint = [
       "## Objective",
