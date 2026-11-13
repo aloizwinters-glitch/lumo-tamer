@@ -21,6 +21,12 @@ import {
   type VideoSheet,
 } from "./analyze.js";
 import {
+  fetchYouTube,
+  findYouTubeIds,
+  youTubeWatchUrl,
+  type YouTubeSettings,
+} from "./youtube.js";
+import {
   findTimestamps,
   findUnsupportedVideoNotices,
   findVideoPaths,
@@ -38,6 +44,8 @@ export interface VideoContext {
   summarize: (turn: Turn) => Promise<string>;
   /** Progress lines for the user (surfaced as thinking). */
   progress: (msg: string) => void;
+  /** YouTube links (yt-dlp); off unless enabled. */
+  youtube?: YouTubeSettings & { enabled: boolean };
 }
 
 function sheetImage(sheet: VideoSheet) {
@@ -50,8 +58,16 @@ function sheetLegend(label: string, sheet: VideoSheet): string {
 }
 
 function header(a: VideoAnalysis): string {
+  const src = a.source;
   return [
-    `[Video "${a.name}" — ${formatTimestamp(a.duration)} — analysed locally by lumo-tamer]`,
+    src
+      ? `[YouTube video "${src.title}" by ${src.channel || "unknown channel"}${src.uploadDate ? `, ${src.uploadDate}` : ""} — ${formatTimestamp(a.duration)} — ${src.url} — fetched and analysed locally by lumo-tamer]`
+      : `[Video "${a.name}" — ${formatTimestamp(a.duration)} — analysed locally by lumo-tamer]`,
+    ...(src?.description
+      ? [
+          `Description (from YouTube): ${src.description.replace(/\n+/g, " ").slice(0, 600)}`,
+        ]
+      : []),
     "You cannot play the video. You get timestamped frames instead: each attached",
     "contact sheet holds 3×3 frames, read left to right then top to bottom, each",
     "frame labelled with its time. Base your answer on these frames, the timeline",
@@ -205,17 +221,44 @@ export async function prepareVideoTurns(
       changed = true;
     }
 
-    const paths = findVideoPaths(content).filter(isVideoFile);
-    if (paths.length === 0) {
+    // Local files, then YouTube links (fetched with yt-dlp, cached by id).
+    const sources: Array<{
+      label: string;
+      load: () => Promise<VideoAnalysis>;
+    }> = [
+      ...findVideoPaths(content)
+        .filter(isVideoFile)
+        .map((path) => ({
+          label: basename(path),
+          load: () => analyzeVideo(ctx.settings, path, ctx.progress),
+        })),
+      ...(ctx.youtube?.enabled ? findYouTubeIds(content) : []).map((id) => ({
+        label: youTubeWatchUrl(id),
+        load: async () => {
+          const yt = await fetchYouTube(
+            ctx.youtube!,
+            id,
+            ctx.settings.transcribeCommand.length === 0,
+            ctx.progress,
+          );
+          return analyzeVideo(ctx.settings, yt.file, ctx.progress, {
+            transcript: yt.transcript,
+            transcriptNote: yt.transcriptNote,
+            source: yt.source,
+          });
+        },
+      })),
+    ];
+    if (sources.length === 0) {
       if (content !== (turn.content ?? "")) out[i] = { ...turn, content };
       continue;
     }
 
     const extraText: string[] = [];
     const extraImages = [...(turn.images ?? [])];
-    for (const path of paths) {
+    for (const source of sources) {
       try {
-        const a = await analyzeVideo(ctx.settings, path, ctx.progress);
+        const a = await source.load();
         lastVideo = a;
         if (isLatest) {
           const budget = Math.max(
@@ -232,11 +275,11 @@ export async function prepareVideoTurns(
         }
       } catch (error) {
         logger.warn(
-          { error: (error as Error).message, file: basename(path) },
+          { error: (error as Error).message, video: source.label },
           "Video analysis failed",
         );
         extraText.push(
-          `[lumo-tamer could not analyse the video "${basename(path)}": ${(error as Error).message}]`,
+          `[lumo-tamer could not analyse the video "${source.label}": ${(error as Error).message}]`,
         );
       }
     }

@@ -80,6 +80,21 @@ export interface VideoAnalysis {
   segments: VideoSegment[];
   transcript?: TranscriptLine[];
   transcriptNote?: string;
+  /** Where the video came from, when not a local file (e.g. YouTube). */
+  source?: {
+    url: string;
+    title: string;
+    channel: string;
+    uploadDate?: string;
+    description?: string;
+  };
+}
+
+/** Extra inputs for a video that came from elsewhere (YouTube). */
+export interface AnalyzeExtras {
+  transcript?: TranscriptLine[];
+  transcriptNote?: string;
+  source?: VideoAnalysis["source"];
 }
 
 const inFlight = new Map<string, Promise<VideoAnalysis>>();
@@ -257,12 +272,13 @@ async function analyzeUncached(
   file: string,
   key: string,
   progress: (msg: string) => void,
+  extras: AnalyzeExtras = {},
 ): Promise<VideoAnalysis> {
   const dir = cacheDir(key);
   mkdirSync(dir, { recursive: true });
   const info = await probe(s.ffprobePath, file);
   progress(
-    `vidéo ${basename(file)} : ${formatTimestamp(info.duration)}, détection des changements de scène…`,
+    `vidéo « ${extras.source?.title ?? basename(file)} » : ${formatTimestamp(info.duration)}, détection des changements de scène…`,
   );
   const scenes = await sceneChanges(s.ffmpegPath, file, s.sceneThreshold);
 
@@ -270,13 +286,14 @@ async function analyzeUncached(
     version: CACHE_VERSION,
     key,
     path: resolve(file),
-    name: basename(file),
+    name: extras.source?.title ?? basename(file),
     duration: info.duration,
     width: info.width,
     height: info.height,
     hasAudio: info.hasAudio,
     sheets: [],
     segments: [],
+    ...(extras.source ? { source: extras.source } : {}),
   };
 
   const end = Math.max(0.5, info.duration - 0.2);
@@ -335,7 +352,10 @@ async function analyzeUncached(
     }
   }
 
-  if (info.hasAudio) {
+  if (extras.transcript && extras.transcript.length > 0) {
+    analysis.transcript = extras.transcript;
+    analysis.transcriptNote = extras.transcriptNote;
+  } else if (info.hasAudio) {
     progress("transcription du son…");
     const t = await transcribe(s, file, dir);
     analysis.transcript = t.lines;
@@ -353,6 +373,7 @@ export async function analyzeVideo(
   s: VideoSettings,
   file: string,
   progress: (msg: string) => void = () => {},
+  extras: AnalyzeExtras = {},
 ): Promise<VideoAnalysis> {
   const key = cacheKey(file);
   const cached = join(cacheDir(key), "analysis.json");
@@ -373,7 +394,7 @@ export async function analyzeVideo(
   }
   const running = inFlight.get(key);
   if (running) return running;
-  const job = analyzeUncached(s, file, key, progress).finally(() =>
+  const job = analyzeUncached(s, file, key, progress, extras).finally(() =>
     inFlight.delete(key),
   );
   inFlight.set(key, job);

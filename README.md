@@ -272,6 +272,14 @@ The video never leaves the machine: only the sheets (U2L-encrypted like any imag
 
 When OpenCode replaces an attached video with `ERROR: Cannot read "x.mp4" (this model does not support video input)`, lumo-tamer tells Lumo to ask you for the file's path.
 
+**YouTube links** (`server.video.youtube.enabled`, off by default) work the same way, through [yt-dlp](https://github.com/yt-dlp/yt-dlp). A link such as `https://www.youtube.com/watch?v=…`, `youtu.be/…` or `/shorts/…` is handled like this:
+
+- **Download:** the video is fetched once into `video-cache/yt-<id>/`, at most `maxHeight` (480p) and `maxDurationSeconds` (1 h). Live streams are refused.
+- **Text:** YouTube's subtitles serve as the transcript. Without them, lumo-tamer uses the local speech-to-text if one is set, else YouTube's auto-captions (un-rolled).
+- **Context:** Lumo also gets the title, channel, date and description.
+- **What is fetched:** only the 11-character video id is taken from the message, and the URL is rebuilt on `www.youtube.com`, so a message cannot make the proxy fetch another host.
+- **Privacy:** YouTube sees your IP and which video you asked for. Proton only gets the encrypted sheets and text, as for local files.
+
 ### Web Search
 
 Native web search (plus weather, stock, cryptocurrency) is off so Lumo does not hit the open web unless you want that (HA-only setups, fewer native/custom mix-ups):

@@ -12,8 +12,53 @@ import {
 } from "../../src/video/timestamps.js";
 import { parseSrt, type VideoSettings } from "../../src/video/analyze.js";
 import { prepareVideoTurns } from "../../src/video/inject.js";
+import {
+  findYouTubeIds,
+  parseRollingSrt,
+  youTubeWatchUrl,
+} from "../../src/video/youtube.js";
 import { setDataDir } from "../../src/app/paths.js";
 import { Role, type Turn } from "../../src/lumo-client/types.js";
+
+describe("YouTube links", () => {
+  it("extracts video ids from the usual link shapes, nothing else", () => {
+    expect(
+      findYouTubeIds(
+        "regarde https://www.youtube.com/watch?v=jNQXAC9IVRw&t=5s et youtu.be/dQw4w9WgXcQ?si=x, " +
+          "m.youtube.com/shorts/abcdefghijk puis https://www.youtube.com/watch?feature=share&v=jNQXAC9IVRw",
+      ),
+    ).toEqual(["jNQXAC9IVRw", "dQw4w9WgXcQ", "abcdefghijk"]);
+    expect(
+      findYouTubeIds(
+        "https://evil.example/watch?v=jNQXAC9IVRw https://youtube.com.evil.example/x",
+      ),
+    ).toEqual([]);
+    expect(
+      findYouTubeIds(
+        "youtube.com/@channel https://www.youtube.com/playlist?list=PL123",
+      ),
+    ).toEqual([]);
+  });
+
+  it("always rebuilds the URL on youtube.com", () => {
+    expect(youTubeWatchUrl("jNQXAC9IVRw")).toBe(
+      "https://www.youtube.com/watch?v=jNQXAC9IVRw",
+    );
+  });
+
+  it("un-rolls YouTube auto-captions", () => {
+    const srt = [
+      "1\n00:00:00,000 --> 00:00:02,000\nbonjour à tous\n",
+      "2\n00:00:02,000 --> 00:00:04,000\nbonjour à tous\naujourd'hui on va voir\n",
+      "3\n00:00:04,000 --> 00:00:06,000\naujourd'hui on va voir\nle serveur dev\n",
+    ].join("\n");
+    expect(parseRollingSrt(srt).map((l) => l.text)).toEqual([
+      "bonjour à tous",
+      "aujourd'hui on va voir",
+      "le serveur dev",
+    ]);
+  });
+});
 
 describe("video helpers", () => {
   it("formats times", () => {

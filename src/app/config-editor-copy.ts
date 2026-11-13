@@ -634,6 +634,23 @@ const COPY: Record<string, FieldCopy> = {
     label: "Scene-change threshold",
     hint: "0–1. Lower keeps more frames at cuts; higher only big changes.",
   },
+  "server.video.youtube.enabled": {
+    label: "YouTube links",
+    hint: "A YouTube link in a message is downloaded in low resolution (yt-dlp) and analysed like a local video.",
+    more: "YouTube sees your IP and the video you asked for; Proton only gets the encrypted contact sheets and text, as for local videos. Uses YouTube subtitles when there are any. Only youtube.com / youtu.be video ids are used, no other URL is fetched.",
+  },
+  "server.video.youtube.ytDlpPath": {
+    label: "yt-dlp command",
+    hint: "Path or name of yt-dlp. Read-only here.",
+  },
+  "server.video.youtube.maxDurationSeconds": {
+    label: "YouTube max length (s)",
+    hint: "Longer videos (and live streams) are refused.",
+  },
+  "server.video.youtube.maxHeight": {
+    label: "YouTube resolution",
+    hint: "Max height downloaded (480 is enough for contact sheets).",
+  },
   "server.video.transcribeCommand": {
     label: "Speech-to-text command",
     hint: "Optional local transcription, e.g. whisper-cli with {audio} and {out}; must write {out}.srt. Read-only here.",

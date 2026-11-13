@@ -212,6 +212,16 @@ server:
     sceneThreshold: 0.3
     # e.g. ["whisper-cli", "-m", "models/ggml-base.bin", "-l", "auto", "-f", "{audio}", "-osrt", "-of", "{out}"]
     transcribeCommand: []
+    # YouTube links in a message: yt-dlp fetches a low-resolution copy and the
+    # subtitles (YouTube's own, else auto-captions when no local speech-to-text
+    # is set) into video-cache/, then the video is analysed like a local file.
+    # Off by default: YouTube sees your IP and which video you asked for.
+    # Only youtube.com / youtu.be video ids are used; no other URL is fetched.
+    youtube:
+      enabled: false
+      ytDlpPath: "yt-dlp"
+      maxDurationSeconds: 3600
+      maxHeight: 480
 
   # Honor tools[] from the client (OpenCode, HA, …). Off = ignore client tools.
   # WARNING: When on, Lumo can trigger actions via those clients.

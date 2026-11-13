@@ -178,6 +178,7 @@ async function withVideoContext(
     options.onReasoning?.(`[lumo-tamer] ${msg}\n`);
   return prepareVideoTurns(turns, {
     settings: video,
+    youtube: { ...video.youtube, ffmpegPath: video.ffmpegPath },
     progress,
     summarize: async (turn) => {
       const result = await deps.queue.add(async () =>

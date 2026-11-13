@@ -206,6 +206,13 @@ const videoConfigSchema = z.object({
   /** Optional local speech-to-text: argv with {audio} and {out} placeholders;
    * must write {out}.srt. Empty = no transcript. */
   transcribeCommand: z.array(z.string()),
+  /** YouTube links → local low-res copy + subtitles via yt-dlp. */
+  youtube: z.object({
+    enabled: z.boolean(),
+    ytDlpPath: z.string().min(1),
+    maxDurationSeconds: z.number().int().positive(),
+    maxHeight: z.number().int().min(144).max(1080),
+  }),
 });
 
 const sharedMergedFields = {

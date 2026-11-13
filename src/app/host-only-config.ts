@@ -30,6 +30,7 @@ export const HOST_ONLY_PATHS: ReadonlySet<string> = new Set([
   "server.video.ffmpegPath",
   "server.video.ffprobePath",
   "server.video.transcribeCommand",
+  "server.video.youtube.ytDlpPath",
 ]);
 
 export function isHostOnlyPath(path: string): boolean {
