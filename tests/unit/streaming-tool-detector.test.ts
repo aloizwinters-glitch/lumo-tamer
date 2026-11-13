@@ -344,6 +344,108 @@ describe("StreamingToolDetector", () => {
     });
   });
 
+  describe("arguments-only fences inferred from client tool parameters", () => {
+    // Shapes of OpenCode's tools (parameters trimmed to the relevant ones).
+    const toolSignatures = [
+      {
+        name: "read",
+        required: ["filePath"],
+        properties: ["filePath", "offset", "limit"],
+      },
+      {
+        name: "edit",
+        required: ["filePath", "oldString", "newString"],
+        properties: ["filePath", "oldString", "newString", "replaceAll"],
+      },
+      {
+        name: "write",
+        required: ["filePath", "content"],
+        properties: ["filePath", "content"],
+      },
+      {
+        name: "shell",
+        required: ["command"],
+        properties: ["command", "timeout", "workdir", "description"],
+      },
+      { name: "execute", required: ["code"], properties: ["code"] },
+    ];
+    const opts = {
+      knownToolNames: toolSignatures.map((s) => s.name),
+      toolSignatures,
+    };
+
+    it("runs the unnamed edit + shell fences seen live (turn ended as text)", () => {
+      const detector = new StreamingToolDetector(opts);
+      const { allText, allToolCalls } = processAll(detector, [
+        'Je corrige la requête puis je redémarre la ressource :\n\n```json\n{\n  "filePath": "C:\\\\res\\\\server.lua",\n  "oldString": "a",\n',
+        '  "newString": "b"\n}\n```\n\n```json\n{\n  "command": "rcon.ps1 \'restart ano_ledger\'",\n  "timeout": 30000,\n  "workdir": "C:\\\\FXServer-test"\n}\n```\n',
+      ]);
+      expect(allToolCalls).toEqual([
+        {
+          name: "edit",
+          arguments: {
+            filePath: "C:\\res\\server.lua",
+            oldString: "a",
+            newString: "b",
+          },
+        },
+        {
+          name: "shell",
+          arguments: {
+            command: "rcon.ps1 'restart ano_ledger'",
+            timeout: 30000,
+            workdir: "C:\\FXServer-test",
+          },
+        },
+      ]);
+      expect(allText).toContain("Je corrige");
+      expect(allText).not.toContain("oldString");
+    });
+
+    it("prefers the tool requiring the most matched parameters", () => {
+      const detector = new StreamingToolDetector(opts);
+      const { allToolCalls } = processAll(detector, [
+        '```json\n{"filePath": "a.lua", "content": "x"}\n```',
+      ]);
+      expect(allToolCalls).toEqual([
+        { name: "write", arguments: { filePath: "a.lua", content: "x" } },
+      ]);
+    });
+
+    it("leaves data that fits no tool, or several equally, as text", () => {
+      for (const body of [
+        '{"a": 1}',
+        '{"filePath": "a", "unknownKey": 1}',
+        "{}",
+      ]) {
+        const detector = new StreamingToolDetector(opts);
+        const { allText, allToolCalls } = processAll(detector, [
+          "Exemple :\n```json\n" + body + "\n```",
+        ]);
+        expect(allToolCalls, body).toHaveLength(0);
+        expect(allText, body).toContain(body);
+      }
+      const twins = [
+        { name: "a", required: ["x"], properties: ["x"] },
+        { name: "b", required: ["x"], properties: ["x"] },
+      ];
+      const detector = new StreamingToolDetector({
+        knownToolNames: ["a", "b"],
+        toolSignatures: twins,
+      });
+      expect(
+        processAll(detector, ['```json\n{"x": 1}\n```']).allToolCalls,
+      ).toHaveLength(0);
+    });
+
+    it("does nothing without signatures (other clients)", () => {
+      const detector = new StreamingToolDetector({ knownToolNames: ["shell"] });
+      expect(
+        processAll(detector, ['```json\n{"command": "ls"}\n```']).allToolCalls,
+      ).toHaveLength(0);
+    });
+  });
+
   describe("markdown header + arguments block", () => {
     const tools = { knownToolNames: ["shell", "glob", "read", "write"] };
 

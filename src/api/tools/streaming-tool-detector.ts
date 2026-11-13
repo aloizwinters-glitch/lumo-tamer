@@ -29,7 +29,11 @@ import {
 import { logger } from "../../app/logger.js";
 import { contentForLog } from "../../app/log-content.js";
 import { getCustomToolsConfig } from "../../app/config.js";
-import { stripToolPrefix } from "./prefix.js";
+import {
+  inferToolFromArguments,
+  stripToolPrefix,
+  type ToolSignature,
+} from "./prefix.js";
 import { getMetrics } from "../../app/metrics.js";
 import {
   extractToolCalls,
@@ -52,6 +56,12 @@ export interface StreamingToolDetectorOptions {
    * but names an unknown tool is left as text instead of being executed.
    */
   knownToolNames?: Iterable<string>;
+  /**
+   * Client tool parameter signatures. A fenced arguments-only object
+   * ({"filePath":…,"oldString":…}) with no name and no header is run as the
+   * one tool whose parameters it fits.
+   */
+  toolSignatures?: ToolSignature[];
 }
 
 export class StreamingToolDetector {
@@ -95,6 +105,31 @@ export class StreamingToolDetector {
       ? [...options.knownToolNames].filter(Boolean)
       : [];
     this.knownToolNames = names.length > 0 ? new Set(names) : null;
+    this.toolSignatures = options.toolSignatures ?? [];
+  }
+
+  private readonly toolSignatures: ToolSignature[];
+
+  /** Fenced arguments-only object → the one client tool it fits, if any. */
+  private inferFromArguments(content: string): ParsedToolCall | null {
+    if (this.toolSignatures.length === 0) return null;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(content);
+    } catch {
+      return null;
+    }
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return null;
+    }
+    const args = parsed as Record<string, unknown>;
+    if ("name" in args && "arguments" in args) return null;
+    const name = inferToolFromArguments(args, this.toolSignatures);
+    if (!name || !this.isKnownTool(name)) return null;
+    logger.info(
+      `Tool call detected (inferred from arguments): ${name} ${contentForLog(args, 80)}`,
+    );
+    return { name, arguments: args };
   }
 
   private showSnippet(index: number) {
@@ -376,10 +411,16 @@ export class StreamingToolDetector {
     const calls = this.parseAllToolCalls(this.buffer);
     const fromMarkdown =
       calls.length === 0 ? this.takeMarkdownHeaderArgs(this.buffer) : null;
+    const inferred =
+      calls.length === 0 && !fromMarkdown && this.markdownHeaderText === null
+        ? this.inferFromArguments(this.buffer)
+        : null;
     if (calls.length > 0) {
       for (const call of calls) this.noteNamedCall(call, result);
     } else if (fromMarkdown) {
       this.noteNamedCall(fromMarkdown, result);
+    } else if (inferred) {
+      this.noteNamedCall(inferred, result);
     } else if (this.buffer === "") {
       logger.debug("[tools] dropped empty json fence");
     } else {
@@ -812,6 +853,11 @@ export class StreamingToolDetector {
           const fromMarkdown =
             calls.length === 0 ? this.takeMarkdownHeaderArgs(cleaned) : null;
           if (fromMarkdown) calls.push(fromMarkdown);
+          const inferred =
+            calls.length === 0 && this.markdownHeaderText === null
+              ? this.inferFromArguments(cleaned)
+              : null;
+          if (inferred) calls.push(inferred);
           if (calls.length > 0) {
             logger.debug("[tools] salvaged tool call from unclosed fence");
             for (const call of calls) this.noteNamedCall(call, result);
