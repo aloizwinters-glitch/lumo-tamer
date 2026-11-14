@@ -3,10 +3,42 @@ import { mkdtempSync, rmSync, existsSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { describeAttachedImages } from "../../src/vision/describe-images.js";
+import { selectImageTools, userWords } from "../../src/lumo-client/images.js";
+import { asksForWeb } from "../../src/lumo-client/web-intent.js";
 import { setDataDir } from "../../src/app/paths.js";
 import { Role, type Turn } from "../../src/lumo-client/types.js";
 
 const img = (id: string) => ({ encrypted: false, image_id: id, data: "AAAA" });
+
+describe("appended descriptions never count as the user's request", () => {
+  it("ignores words from the description for web and image intent (seen live: 'YOU NEWS' turned on web search)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "lt-desc-"));
+    setDataDir(dir);
+    try {
+      const turns: Turn[] = [
+        {
+          role: Role.User,
+          content: "les menus en bas doivent être plus haut",
+          images: [img("tcg")],
+        },
+      ];
+      const out = await describeAttachedImages(turns, {
+        describe: async () =>
+          'Capture du téléphone : en-tête "TCG MARKET — YOU NEWS COLLECTIBLES", dernières news, bouton "Générer une image", heure 1:59.',
+        progress: () => {},
+      });
+      expect(out[0].content).toContain("YOU NEWS");
+      expect(asksForWeb(out)).toBe(false);
+      expect(selectImageTools(out)).toEqual(["describe_image"]);
+      expect(userWords(out[0].content ?? "")).toBe(
+        "les menus en bas doivent être plus haut",
+      );
+    } finally {
+      setDataDir(undefined);
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
 
 describe("describeAttachedImages", () => {
   let dir: string;
