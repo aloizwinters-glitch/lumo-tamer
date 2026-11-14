@@ -80,6 +80,12 @@ describe("video helpers", () => {
     expect(
       findVideoPaths("le fichier config.ts et https://x.y/a.mp4html"),
     ).toEqual([]);
+    // TypeScript sources are not MPEG-TS videos (seen live: every message ran ffprobe on *.ts).
+    expect(
+      findVideoPaths(
+        "regarde C:\\Users\\aloiz\\lumo-tamer\\src\\lumo-client\\images.ts et C:/x/tests/unit/video.test.ts",
+      ),
+    ).toEqual([]);
   });
 
   it("detects OpenCode's unsupported-video notice", () => {

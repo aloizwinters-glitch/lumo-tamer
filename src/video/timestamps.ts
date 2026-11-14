@@ -3,6 +3,8 @@
  * finding video paths / times in user text.
  */
 
+// No "ts": MPEG transport streams share the extension with TypeScript, and
+// agent conversations are full of src/**/*.ts paths.
 export const VIDEO_EXTENSIONS = [
   "mp4",
   "m4v",
@@ -14,7 +16,7 @@ export const VIDEO_EXTENSIONS = [
   "flv",
   "mpg",
   "mpeg",
-  "ts",
+  "m2ts",
   "3gp",
 ];
 
