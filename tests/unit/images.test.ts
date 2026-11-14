@@ -128,6 +128,23 @@ describe("shouldOfferImageTools", () => {
   });
   const toolResult = user("[Tool Result: bash]\nok");
 
+  it("does not offer tools when the user merely mentions image generation", () => {
+    // Real case: reporting a bug about parasitic image generation used to be
+    // matched as a request ("la generation d'image" == "génère une image"),
+    // advertising generate_image and inviting stray calls.
+    for (const text of [
+      "Il viens d'y avoir 2 appel parasite sur la generation d'image",
+      "Il y a encore des appels parasites sur la generation d'image",
+      "pourquoi tu as généré une image alors que je l'ai pas demandé",
+      "arrête de générer des images",
+      "l'image générée était parasite",
+      "le tool generate_image est proposé",
+      "image generation should be off",
+    ]) {
+      expect(shouldOfferImageTools([user(text)])).toBe(false);
+    }
+  });
+
   it("offers tools when the user asks for a picture", () => {
     for (const text of [
       "Dessine-moi un chat roux",

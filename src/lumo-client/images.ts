@@ -340,6 +340,20 @@ const CREATE_IMAGE_RE = new RegExp(
 const NOT_A_PICTURE_RE =
   /(?:docker|container|conteneur|oci|disk|disque|iso|vm|base|os|system|syst[eè]me)\s+images?|images?\s+(?:docker|de\s+base|disque|iso|du\s+conteneur)/giu;
 
+/** Meta mentions of image generation never count as a request: bug reports
+ *  ("la génération d'image"), tool names ("generate_image"), participles
+ *  ("l'image générée") and stop requests ("arrête de générer"). */
+const META_IMAGE_RE = new RegExp(
+  [
+    "(?:generate|edit|describe)_image\\b",
+    "g[ée]n[ée]r(?:ation|ations)\\s+d['’]?\\s?images?|image\\s+generations?",
+    "images?\\s+(?:g[ée]n[ée]r|generat)\\p{L}*",
+    "(?:arr[êe]t\\p{L}*|stop\\p{L}*|cess\\p{L}*|sans)\\s+(?:de\\s+|d['’]\\s+)?(?:g[ée]n\\p{L}*|generat\\p{L}*)",
+    "(?:g[ée]n[ée]r[ée](?:e|s)?|generated|créé(?:e|s)?|created)(?!\\p{L})",
+  ].join("|"),
+  "giu",
+);
+
 /** Agent background requests (OpenCode title generation, compaction) must never draw. */
 const HELPER_REQUEST_RE =
   /title generator|thread title|generate a (?:short )?title|summari[sz]e the conversation|structured summary|existing checkpoint/i;
@@ -356,9 +370,13 @@ function isGenuineUserTurn(turn: Turn): boolean {
 
 const hasImages = (t: Turn | undefined) => (t?.images?.length ?? 0) > 0;
 
-/** True if the text asks for a picture to be made. */
+/** True if the text asks for a picture to be made. Meta mentions (bug
+ *  reports, tool names, stop requests) never count. */
 export function asksForImage(text: string): boolean {
-  const clean = text.replace(MARKER_RE, " ").replace(NOT_A_PICTURE_RE, " ");
+  const clean = text
+    .replace(MARKER_RE, " ")
+    .replace(NOT_A_PICTURE_RE, " ")
+    .replace(META_IMAGE_RE, " ");
   return DRAW_RE.test(clean) || CREATE_IMAGE_RE.test(clean);
 }
 
