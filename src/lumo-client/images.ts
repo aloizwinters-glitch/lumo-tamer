@@ -437,7 +437,8 @@ export function asksForImageEdit(
  * user message:
  * - asks for a picture -> generate_image;
  * - attached an image -> describe_image, plus edit_image only if it asks to change
- *   the picture (a screenshot sent for context is never edited);
+ *   the picture (a screenshot sent for context is never edited); offered only on
+ *   the request that directly answers that message, never on later tool-loop steps;
  * - directly answers an assistant message that showed an image and asks for a
  *   change ("make it blue") -> edit_image + describe_image.
  * Never on helper requests (title / summary), nor again on tool-loop steps once an
@@ -461,7 +462,11 @@ export function selectImageTools(
 
   const tools = new Set<ToolName>();
   if (asksForImage(text)) tools.add("generate_image");
-  if (hasImages(user)) {
+  // Attachments: only on the request that directly answers the image-bearing
+  // message. Later tool-loop steps already carry the description in the
+  // transcript; re-offering describe_image makes the agent describe the
+  // screenshot again instead of continuing the actual task.
+  if (hasImages(user) && g === turns.length - 1) {
     tools.add("describe_image");
     if (asksForImageEdit(text, true)) tools.add("edit_image");
   }

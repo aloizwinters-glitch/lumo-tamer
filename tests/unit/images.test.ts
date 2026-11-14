@@ -249,6 +249,28 @@ describe("shouldOfferImageTools", () => {
     ).toBe(false);
   });
 
+  it("does not re-offer describe_image on tool-loop steps after an attachment", () => {
+    // Real agent case: user attaches a screenshot (storage bug) to a bug hunt;
+    // the tool loop must keep searching the code, not describe the image again.
+    expect(
+      shouldOfferImageTools([
+        user("le telephone affiche 154 Go de stockage, trouve le bug", [
+          img("1"),
+        ]),
+        asst('```json\n{"name":"user:grep","arguments":{}}\n```'),
+        toolResult,
+      ]),
+    ).toBe(false);
+    // But the request that directly answers the attachment still gets the tools.
+    expect(
+      selectImageTools([
+        user("le telephone affiche 154 Go de stockage, trouve le bug", [
+          img("1"),
+        ]),
+      ]),
+    ).toEqual(["describe_image"]);
+  });
+
   it("allows follow-up edits on a conversation with images, but not mid tool loop", () => {
     const history = [
       user("dessine un chat"),
